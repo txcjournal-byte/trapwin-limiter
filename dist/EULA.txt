@@ -1,0 +1,59 @@
+TrapWin Limiter - End User License Agreement (EULA)
+====================================================
+
+By installing or using TrapWin Limiter (the "Software") you agree to these terms.
+If you do not agree, do not install or use the Software.
+
+1. LICENSE
+   TrapWin ("the Licensor") grants you, the purchaser, a personal, non-exclusive,
+   non-transferable license to install and use the Software on computers that you
+   own or personally use. You may install the Software on several of your own
+   computers as long as you are the only person using it.
+
+2. YOUR MUSIC IS YOURS
+   You may use the Software to create, mix and master music and other audio,
+   including for commercial releases, without any royalties or credits owed to
+   the Licensor. All audio you process with the Software belongs to you.
+
+3. RESTRICTIONS
+   You may not:
+   a) share, sell, rent, lend, upload or otherwise distribute the Software, its
+      installation files or your license to other people;
+   b) reverse engineer, decompile, disassemble or modify the Software, except
+      where applicable law expressly permits it;
+   c) remove or change copyright notices, trademarks or the third-party license
+      notices included with the Software.
+
+4. OWNERSHIP
+   The Software is licensed, not sold. The Licensor keeps all rights, title and
+   interest in the Software, its design and its trademarks. Third-party components
+   included in the Software are licensed under their own terms, listed in
+   THIRD-PARTY-LICENSES.txt.
+
+5. UPDATES
+   The Licensor may, but is not obliged to, provide updates. Updates are covered
+   by this EULA unless they come with a different agreement.
+
+6. NO WARRANTY
+   The Software is provided "as is", without warranty of any kind, to the extent
+   permitted by law. The Licensor does not guarantee that the Software will be
+   free of errors or work with every host application or computer. Always keep
+   backups of your projects.
+
+7. LIMITATION OF LIABILITY
+   To the extent permitted by law, the Licensor is not liable for any indirect,
+   incidental or consequential damages, including loss of data, projects or
+   profits, arising from the use of or inability to use the Software. The
+   Licensor's total liability is limited to the price you paid for the Software.
+   Nothing in this EULA limits rights you have as a consumer under mandatory law.
+
+8. TERMINATION
+   This license ends automatically if you break these terms. When it ends you
+   must delete all copies of the Software.
+
+9. GOVERNING LAW
+   This EULA is governed by the laws of the Czech Republic, without regard to
+   conflict-of-law rules, unless mandatory consumer law of your country says
+   otherwise.
+
+TrapWin Limiter (c) 2026 TrapWin. All rights reserved.

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>TrapWin Limiter - Manual</title>
+<style>
+@font-face{font-family:'TWSerif';src:url('../../plugin/res/DejaVuSerif-Bold.ttf');}
+@font-face{font-family:'TWMono';src:url('../../plugin/res/LiberationMono-Bold.ttf');}
+@page{size:A4;margin:18mm 17mm 18mm 17mm;}
+:root{--ink:#1d1f23;--muted:#5d636c;--line:#d9d6cf;--accent:#2f6fe0;--panel:#f3f1ec;}
+body{font-family:'DejaVu Sans','Liberation Sans',Arial,sans-serif;color:var(--ink);font-size:10pt;line-height:1.5;margin:0;}
+h1,h2,h3{font-family:'TWSerif',serif;letter-spacing:.02em;line-height:1.2;}
+h1{font-size:30pt;margin:0;}
+h2{font-size:15pt;margin:22pt 0 6pt;padding-bottom:4pt;border-bottom:2px solid var(--ink);break-after:avoid;}
+h3{font-size:11pt;margin:14pt 0 4pt;break-after:avoid;}
+p{margin:0 0 7pt;}
+.mono{font-family:'TWMono',monospace;letter-spacing:.06em;}
+.cover{height:250mm;display:flex;flex-direction:column;justify-content:center;break-after:page;}
+.cover .kicker{font-family:'TWMono';letter-spacing:.35em;font-size:10pt;color:var(--muted);margin-bottom:8pt;}
+.cover .sub{font-size:13pt;color:var(--muted);margin:6pt 0 26pt;}
+.cover img{width:100%;border-radius:4px;box-shadow:0 6px 20px rgba(0,0,0,.25);}
+.cover .ver{margin-top:22pt;font-family:'TWMono';font-size:9pt;color:var(--muted);letter-spacing:.15em;}
+img.ui{width:100%;break-after:avoid;border-radius:3px;margin:4pt 0 10pt;}
+table{width:100%;border-collapse:collapse;margin:4pt 0 10pt;font-size:9.3pt;break-inside:auto;}
+th,td{text-align:left;vertical-align:top;padding:5pt 7pt;border-bottom:1px solid var(--line);}
+th{font-family:'TWMono';font-size:8pt;letter-spacing:.12em;color:var(--muted);font-weight:normal;border-bottom:1.5px solid var(--ink);}
+tr{break-inside:avoid;}
+td:first-child{font-family:'TWMono';white-space:nowrap;letter-spacing:.05em;width:24%;}
+td.range{font-family:inherit;white-space:nowrap;color:var(--muted);width:18%;}
+.tip{background:var(--panel);border-left:3px solid var(--accent);padding:7pt 10pt;margin:8pt 0 10pt;break-inside:avoid;}
+.tip b{font-family:'TWMono';letter-spacing:.08em;font-size:8.5pt;color:var(--accent);}
+ol,ul{margin:0 0 8pt 16pt;padding:0;} li{margin:2pt 0;}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14pt;}
+.small{font-size:8.5pt;color:var(--muted);}
+.section{break-before:page;}
+</style></head><body>
+
+<div class="cover">
+  <div class="kicker">TRAPWIN · AUDIO UNDERGROUND</div>
+  <h1>TrapWin Limiter</h1>
+  <div class="sub">TW-2 clipper &amp; true-peak limiter for trap and underground music</div>
+  <img src="ui_main.png" alt="TrapWin Limiter user interface">
+  <div class="ver">USER MANUAL · VERSION 2.5 · WINDOWS &amp; MACOS · VST3 / AU / CLAP</div>
+</div>
+
+<h2>1. What it is</h2>
+<p>TrapWin Limiter makes your beats loud without losing the punch of the kick and the weight of the 808. It combines four stages in one plugin, in this order:</p>
+<ol>
+  <li><b>Input gain, punch and stereo width</b>: how hard you drive the processing.</li>
+  <li><b>808 enhancer and saturation</b>: harmonics that make sub bass audible on phones and laptop speakers, plus warmth and density.</li>
+  <li><b>Clipper</b> (Tape, Hard or Soft): shaves off the sharpest peaks before the limiter, which keeps drums punchy at high loudness.</li>
+  <li><b>True-peak limiter</b> with lookahead: holds the output safely under your ceiling, including the inter-sample peaks that cause distortion after MP3/AAC conversion on streaming services.</li>
+</ol>
+<p>Built-in LUFS and true-peak metering, a streaming loudness preview and a "delta" listen mode help you decide how loud is loud enough.</p>
+
+<h2>2. Installation</h2>
+<h3>Windows</h3>
+<ol>
+  <li>Close your DAW.</li>
+  <li>Run <span class="mono">TrapWin_Limiter_Windows_Setup.exe</span> and follow the steps. It installs the VST3 (and optionally CLAP) into the standard plugin folders.</li>
+  <li><i>Manual install instead:</i> copy the folder <span class="mono">TrapLimit.vst3</span> from the ZIP into <span class="mono">C:\Program Files\Common Files\VST3\</span> (and optionally <span class="mono">TrapLimit.clap</span> into <span class="mono">C:\Program Files\Common Files\CLAP\</span>).</li>
+  <li>Start your DAW and rescan plugins (FL Studio: <i>Options › Manage plugins › Find installed plugins</i>).</li>
+</ol>
+<h3>macOS</h3>
+<ol>
+  <li>Close your DAW.</li>
+  <li>Double-click <span class="mono">TrapWin_Limiter_macOS.pkg</span> and follow the installer. Choose which formats to install: VST3, Audio Unit (AU, needed for Logic Pro and GarageBand) and CLAP.</li>
+  <li>Start your DAW. Logic Pro scans new Audio Units automatically; in other hosts rescan plugins.</li>
+</ol>
+<p>Load <b>TrapWin Limiter</b> (vendor TrapWin) as the last plugin on your master or on a bus.</p>
+<p class="small">Requirements: Windows 10 or 11 (64-bit) or macOS 10.15 or newer (Intel or Apple Silicon, native); a 64-bit VST3, AU or CLAP host; OpenGL graphics. Sample rates from 44.1 kHz to 192 kHz are supported.</p>
+
+<h2>3. Quick start: a loud trap master in one minute</h2>
+<ol>
+  <li>Put TrapWin Limiter last on the master channel.</li>
+  <li>Choose the preset <b>Trap Master Loud</b> (click the preset name, or use the <span class="mono">&lt;</span> <span class="mono">&gt;</span> arrows).</li>
+  <li>Play the loudest part of your beat and turn <b>INPUT</b> up until the needle shows about 3-6 dB of gain reduction on the loudest hits.</li>
+  <li>Leave <b>CEILING</b> at −1.0 dB for streaming releases (−0.3 dB is common for club or beat-store files).</li>
+  <li>Press <b>A</b> to switch to setting B, set INPUT lower, and compare both. In the settings page, turn on <b>0 dB MATCH</b> for a fair comparison at equal level.</li>
+</ol>
+<div class="tip"><b>TIP</b><br>If the 808 starts to "fart" or the kick loses its click, lower INPUT a little or switch the clipper from HARD to TAPE or SOFT. Loudness that ruins the groove is never worth it.</div>
+
+<h2>4. Main panel</h2>
+<img class="ui" src="ui_main.png" alt="Main panel">
+
+<h3>Left section</h3>
+<table>
+<tr><th>CONTROL</th><th>RANGE</th><th>WHAT IT DOES</th></tr>
+<tr><td>ON / BYPASS</td><td class="range">on / off</td><td>The blue LED shows the plugin is active. The switch bypasses it. Bypass is delay-compensated and crossfaded, so you can compare without clicks or timing jumps.</td></tr>
+<tr><td>INPUT</td><td class="range">0 to +24 dB</td><td>Gain into the processing. This is your main loudness control: more input means more clipping and limiting, and a louder result.</td></tr>
+<tr><td>CEILING</td><td class="range">−12 to 0 dB</td><td>Maximum output level. Both the clipper and the limiter work against this level. Default −0.3 dB; −1.0 dB is the safe choice for streaming.</td></tr>
+<tr><td>DRIVE</td><td class="range">0 to +12 dB</td><td>Extra gain into the clipper and saturation only. Use it for more grit and harmonic density without changing how the limiter reacts to the input.</td></tr>
+<tr><td>RELEASE</td><td class="range">5 ms to 1 s</td><td>How fast the limiter recovers after a peak. Short = louder and more aggressive, long = smoother. The selected MODE scales this time (see below).</td></tr>
+</table>
+
+<h3>Clipper</h3>
+<table>
+<tr><th>BUTTON</th><th></th><th>CHARACTER</th></tr>
+<tr><td>TAPE</td><td class="range"></td><td>Rounded, warm saturation curve with a gentle knee. The most forgiving on full mixes and vocals.</td></tr>
+<tr><td>HARD</td><td class="range"></td><td>Straight cut at the ceiling. The punchiest sound for drums and 808s, but it gets harsh when pushed too far.</td></tr>
+<tr><td>SOFT</td><td class="range"></td><td>Smooth clipping that starts below the ceiling (default). A good middle ground.</td></tr>
+<tr><td>OFF</td><td class="range"></td><td>Clipper disabled. Only the limiter controls peaks, which is the most transparent option.</td></tr>
+</table>
+
+<h3>Meter (centre)</h3>
+<p>The needle shows the <b>total gain reduction</b> of the clipper and limiter together (scale 0 to 20 dB). The left display shows <b>integrated loudness in LUFS</b>, the right display the <b>highest true peak in dBTP</b>; it turns red if the output ever exceeded the ceiling. <b>Click inside the meter window</b> to reset the measurements, for example before playing the song from the start.</p>
+
+<h3>Preset bar</h3>
+<table>
+<tr><th>BUTTON</th><th></th><th>FUNCTION</th></tr>
+<tr><td>&lt;  &gt;</td><td class="range"></td><td>Previous / next preset (factory presets first, then your own).</td></tr>
+<tr><td>Preset name</td><td class="range"></td><td>Opens the preset browser with <i>Factory</i> and <i>My presets</i> tabs. In My presets, click the delete mark twice to delete a preset.</td></tr>
+<tr><td>SAVE</td><td class="range"></td><td>Saves the current settings as your own preset. Type a name and press Enter.</td></tr>
+<tr><td>A / B</td><td class="range"></td><td>Switches between two complete settings for quick comparison.</td></tr>
+<tr><td>MORE</td><td class="range"></td><td>Opens the settings page with advanced controls (section 5).</td></tr>
+</table>
+
+<h3>Right section</h3>
+<table>
+<tr><th>CONTROL</th><th>RANGE</th><th>WHAT IT DOES</th></tr>
+<tr><td>MODE · TRANS</td><td class="range"></td><td>Transparent: clean limiting with your release setting unchanged.</td></tr>
+<tr><td>MODE · PUNCH</td><td class="range"></td><td>Adds transient emphasis, a slightly slower attack and a faster release (×0.7). Kicks and snares hit harder.</td></tr>
+<tr><td>MODE · LOUD</td><td class="range"></td><td>Adds +2 dB drive into the clipper and halves the release time. Maximum loudness.</td></tr>
+<tr><td>MODE · DIRTY</td><td class="range"></td><td>Adds strong tape-style saturation and a faster release (×0.6). Gritty, underground character.</td></tr>
+<tr><td>SAT</td><td class="range">0 to 100 %</td><td>Saturation before the clipper: adds warmth and density while keeping peaks under control.</td></tr>
+<tr><td>808 BOOST</td><td class="range">0 to 100 %</td><td>Adds harmonics to everything below 120 Hz, so the 808 and sub bass stay audible on phones, laptops and earbuds without adding more sub energy.</td></tr>
+<tr><td>TRUE PEAK</td><td class="range">on / off</td><td>On (default): the limiter also catches inter-sample peaks, so the file does not clip after conversion to MP3/AAC. Off: sample-peak limiting, slightly louder but less safe.</td></tr>
+<tr><td>MONO SUB</td><td class="range">on / off</td><td>Makes everything below 120 Hz mono. Tighter low end and no phase problems on club systems and mono speakers.</td></tr>
+</table>
+
+<h3>Mouse control</h3>
+<ul>
+  <li><b>Drag</b> a knob up or right to increase, down or left to decrease.</li>
+  <li><b>Shift + drag</b> or <b>Shift + mouse wheel</b> for fine adjustment.</li>
+  <li><b>Mouse wheel</b> over a knob changes its value.</li>
+  <li><b>Double-click</b> or <b>right-click</b> a knob to return it to its default value.</li>
+  <li>The window can be resized by dragging its corner; the panel keeps its proportions.</li>
+</ul>
+
+<h2>5. Settings page (MORE)</h2>
+<img class="ui" src="ui_settings.png" alt="Settings page">
+<p>Click a box to switch it; drag up or down (or use the mouse wheel) on value boxes. Double-click a value to reset it. Close the page with <span class="mono">X</span>.</p>
+<table>
+<tr><th>SETTING</th><th>RANGE · DEFAULT</th><th>WHAT IT DOES</th></tr>
+<tr><td>LOOKAHEAD</td><td class="range">0.1-5 ms · 1.5</td><td>How far ahead the limiter looks to catch peaks. Longer = cleaner on fast transients. Overall plugin latency stays constant.</td></tr>
+<tr><td>ATTACK</td><td class="range">0.05-5 ms · 0.5</td><td>How smoothly gain reduction starts. Very short attack is tight but can distort low bass.</td></tr>
+<tr><td>STEREO LINK</td><td class="range">0-100 % · 100</td><td>100 % = both channels get the same gain reduction (stable stereo image). Lower values limit each side more independently.</td></tr>
+<tr><td>WIDTH</td><td class="range">0-200 % · 100</td><td>Stereo width before processing. 0 % = mono, 200 % = extra wide.</td></tr>
+<tr><td>PUNCH</td><td class="range">0-100 % · 0</td><td>Transient shaper before the clipper. Brings out the attack of drums. The PUNCH mode adds to this value.</td></tr>
+<tr><td>AUTO RELEASE</td><td class="range">on / off · on</td><td>Adapts the release to the music: fast on short peaks, slower on sustained loud parts. Reduces pumping.</td></tr>
+<tr><td>LIMITER</td><td class="range">on / off · on</td><td>Turns the limiter stage off, leaving only gain, saturation and clipper. Use it to use the plugin as a pure clipper. With the limiter off, the output is no longer held under the ceiling.</td></tr>
+<tr><td>OVERSAMPLE</td><td class="range">1x / 2x / 4x · 2x</td><td>Runs the clipper and saturation at a higher sample rate to reduce aliasing (harshness). 4x sounds cleanest and uses the most CPU.</td></tr>
+<tr><td>SUB SPLIT</td><td class="range">on / off · off</td><td>With the clipper on, the sub band (below 120 Hz) gets its own gentle clipping and is not hit by the main clipper. Keeps the 808 round while drums are clipped hard.</td></tr>
+<tr><td>HPF SIDECHAIN</td><td class="range">on / off · off</td><td>The limiter recovers faster when gain reduction is caused by sub bass. Less pumping on heavy 808s.</td></tr>
+<tr><td>MID / SIDE</td><td class="range">on / off · off</td><td>Limits the mid and side signals separately; the side recovers faster to keep the mix wide.</td></tr>
+<tr><td>DITHER 16 BIT</td><td class="range">on / off · off</td><td>Adds low-level dither. Turn on only when you export a 16-bit WAV directly from this plugin.</td></tr>
+<tr><td>STREAM PREVIEW</td><td class="range">Off / −14 / −16 / −9 LUFS</td><td>Turns the output down the way streaming services would (−14 LUFS Spotify/YouTube style, −16 Apple Music style, −9 loud reference). Use it to check if pushing harder still makes sense. <b>Turn it off before exporting.</b></td></tr>
+<tr><td>0 dB MATCH</td><td class="range">on / off · off</td><td>Compensates INPUT and DRIVE gain on the output, so you hear the processing at roughly the original level instead of just "louder".</td></tr>
+<tr><td>DELTA</td><td class="range">on / off · off</td><td>Plays only what the clipper and limiter remove. If you can clearly hear your kick or vocal in delta mode, you are pushing too hard.</td></tr>
+<tr><td>RESET METERS</td><td class="range">click</td><td>Resets the LUFS and true-peak readings.</td></tr>
+</table>
+
+<h2>6. Factory presets</h2>
+<table>
+<tr><th>PRESET</th><th></th><th>USE IT FOR</th></tr>
+<tr><td>Default</td><td class="range"></td><td>Neutral starting point: soft clipper, transparent mode, −0.3 dB ceiling.</td></tr>
+<tr><td>808 Heavy</td><td class="range"></td><td>Beats built around a big 808: 808 BOOST, sub split, mono sub, HPF sidechain, punch mode.</td></tr>
+<tr><td>Trap Master Loud</td><td class="range"></td><td>Competitive loudness for trap masters: +9 dB input, punch, saturation, loud mode, 4x oversampling.</td></tr>
+<tr><td>Underground Dirty</td><td class="range"></td><td>Gritty, saturated sound: tape clipper, heavy saturation, dirty mode.</td></tr>
+<tr><td>Vocal Bus</td><td class="range"></td><td>Gentle peak control for vocal groups: no clipper, slower attack, −1 dB ceiling.</td></tr>
+<tr><td>Transparent Master</td><td class="range"></td><td>Clean mastering limiter for any genre: no clipper, long lookahead, −1 dB ceiling.</td></tr>
+</table>
+<p>Your own presets are saved as <span class="mono">.tlpreset</span> files in <span class="mono">%APPDATA%\TrapVST\Limiter\Presets</span> (Windows) or <span class="mono">~/.trapvst/limiter/presets</span> (macOS). Copy this folder to move your presets to another computer.</p>
+<p>The plugin state is saved inside your DAW project automatically. Your host's own preset system also works.</p>
+
+<h2>7. Tips</h2>
+<div class="cols">
+<div>
+<h3>How loud?</h3>
+<p>Streaming services turn loud songs down to about −14 LUFS. A master at −7 LUFS is not louder there; it only has less punch. Use STREAM PREVIEW to hear this. For trap, −9 to −6 LUFS integrated is common; let your ears decide.</p>
+<h3>Clipper first, limiter second</h3>
+<p>Let the clipper take the first 1-3 dB of the sharpest peaks (fast drum transients) and the limiter the rest. This sounds louder and punchier than limiting alone.</p>
+</div>
+<div>
+<h3>Keep the 808 clean</h3>
+<p>Turn on MONO SUB and HPF SIDECHAIN, and try SUB SPLIT. Use 808 BOOST for presence on small speakers instead of more low-end EQ.</p>
+<h3>Check with DELTA</h3>
+<p>Short clicks in delta mode are fine. If you can hear the melody or vocal, back off INPUT or DRIVE.</p>
+</div>
+</div>
+
+<div style="break-inside:avoid"><h2>8. Technical data</h2>
+<table>
+<tr><td>Formats</td><td colspan="2">Windows 10/11 64-bit: VST3, CLAP · macOS 10.15+ (Intel + Apple Silicon): VST3, AU, CLAP</td></tr>
+<tr><td>Channels</td><td colspan="2">Stereo in / stereo out</td></tr>
+<tr><td>Sample rates</td><td colspan="2">44.1 kHz to 192 kHz</td></tr>
+<tr><td>Latency</td><td colspan="2">Constant, reported to the host for automatic delay compensation: 294 samples (6.1 ms) at 48 kHz, 275 samples at 44.1 kHz. It does not change with oversampling or lookahead settings.</td></tr>
+<tr><td>Metering</td><td colspan="2">Integrated loudness (ITU-R BS.1770 / EBU R128 style, LUFS), true peak (dBTP), gain reduction</td></tr>
+<tr><td>Oversampling</td><td colspan="2">1x, 2x, 4x for the clipper and saturation stages</td></tr>
+</table>
+
+</div><div style="break-inside:avoid"><h2>9. Troubleshooting</h2>
+<table>
+<tr><td>Plugin not found</td><td colspan="2">Windows: check that the folder is <span class="mono">C:\Program Files\Common Files\VST3\TrapLimit.vst3</span>. macOS: plugins are in <span class="mono">/Library/Audio/Plug-Ins/</span> (VST3, Components, CLAP). Then rescan plugins in your DAW. In FL Studio, enable "Rescan previously verified plugins".</td></tr>
+<tr><td>Plugin listed twice</td><td colspan="2">An older copy is installed in another folder. Delete the old one and rescan.</td></tr>
+<tr><td>Window too big or small</td><td colspan="2">Drag the window corner to resize. The size adapts to your Windows display scaling.</td></tr>
+<tr><td>Output quieter than expected</td><td colspan="2">STREAM PREVIEW or 0 dB MATCH is on (settings page). Turn them off before exporting.</td></tr>
+<tr><td>No sound</td><td colspan="2">Check DELTA is off and the plugin is not bypassed.</td></tr>
+</table>
+
+</div><p class="small" style="margin-top:18pt">TrapWin Limiter © 2026 TrapWin. All rights reserved. Use of the software is subject to the EULA included in the download. Third-party components are listed in THIRD-PARTY-LICENSES.txt. VST is a registered trademark of Steinberg Media Technologies GmbH. All other product names are the property of their respective owners.</p>
+</body></html>

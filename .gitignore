@@ -1,0 +1,7 @@
+/bin/
+/build/
+/out/
+/test/render/
+*.o
+*.d
+.DS_Store
