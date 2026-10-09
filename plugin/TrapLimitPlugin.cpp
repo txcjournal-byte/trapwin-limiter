@@ -4,6 +4,9 @@
 #include "Dsp.hpp"
 #include <chrono>
 #include <random>
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+# include <xmmintrin.h>
+#endif
 
 START_NAMESPACE_DISTRHO
 
@@ -11,6 +14,22 @@ using namespace tl;
 
 static const int kOSLatency = 48;   // fixed oversampling-stage latency (4x path), padded for 1x/2x
 static const int kTPLatency = 6;
+
+// Flush-to-zero for the duration of run(): denormal numbers in the filter/envelope
+// tails are slow on many CPUs and must never reach the host (pluginval checks this).
+struct ScopedFlushDenormals {
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+    unsigned int csr;
+    ScopedFlushDenormals() : csr(_mm_getcsr()) { _mm_setcsr(csr | 0x8040); }  // FTZ | DAZ
+    ~ScopedFlushDenormals() { _mm_setcsr(csr); }
+#elif defined(__aarch64__)
+    unsigned long long fpcr;
+    ScopedFlushDenormals() { __asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr)); unsigned long long n = fpcr | (1ULL << 24); __asm__ __volatile__("msr fpcr, %0" :: "r"(n)); }
+    ~ScopedFlushDenormals() { __asm__ __volatile__("msr fpcr, %0" :: "r"(fpcr)); }
+#endif
+};
+
+static inline float flushTiny(float v) { return std::fabs(v) < 1e-30f ? 0.f : v; }
 
 class TrapLimitPlugin : public Plugin
 {
@@ -278,6 +297,7 @@ protected:
     // ------------------------------------------------------------ process
     void run(const float** inputs, float** outputs, uint32_t frames) override
     {
+        const ScopedFlushDenormals noDenormals;
         const auto t0 = std::chrono::steady_clock::now();
         if (resetMetersFlag) { resetMetersFlag = false; loud.reset(); tpMax = 0; }
 
@@ -426,8 +446,8 @@ protected:
             const float ddR = dryDelay[1].process(dryR, totalLatency);
             float bp = bypassSm.next();
             if (bp > 0.9999f) bp = 1.f; else if (bp < 0.0001f) bp = 0.f;
-            outL[i] = y[0] + (ddL - y[0]) * bp;
-            outR[i] = y[1] + (ddR - y[1]) * bp;
+            outL[i] = flushTiny(y[0] + (ddL - y[0]) * bp);
+            outR[i] = flushTiny(y[1] + (ddR - y[1]) * bp);
         }
 
         // ---- output parameters ----

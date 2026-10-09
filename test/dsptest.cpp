@@ -173,6 +173,25 @@ int main()
         p.deactivate();
     }
 
+    // ---- 7. no subnormal (denormal) samples in the output, e.g. in the silent tail after a signal ----
+    {
+        auto countSub = [](const std::vector<float>& a) { size_t n = 0; for (float v : a) if (v != 0.f && std::fabs(v) < 1.17549435e-38f) ++n; return n; };
+        struct F { const char* n; uint32_t id; float v; } cfg[] = {
+            {"default", kGain, 0}, {"808 boost", k808, 80}, {"sub split", kSubSplit, 1}, {"mono sub", kMonoSub, 1},
+            {"HPF sidechain", kHpfSc, 1}, {"punch", kPunch, 100}, {"dirty mode", kMode, 3}, {"no clip, 4x", kOversample, 2},
+        };
+        for (auto& f : cfg) {
+            Host h; h.set(f.id, f.v);
+            size_t n = (size_t)(SR * 6); std::vector<float> a(n, 0.f), b(n, 0.f);
+            for (size_t i = 0; i < (size_t)SR / 2; ++i) a[i] = b[i] = (float)(0.8 * std::sin(2 * M_PI * 55 * i / SR) * std::exp(-3.0 * i / SR));
+            // tiny input values like a host can deliver after a fade-out
+            for (size_t i = (size_t)SR; i < (size_t)SR * 2; ++i) a[i] = b[i] = 1e-39f;
+            h.process(a, b, oL, oR);
+            const size_t sub = countSub(oL) + countSub(oR);
+            CHECK(sub == 0, "no subnormals in output (%s): %zu found", f.n, sub);
+        }
+    }
+
     std::printf("\n%s: %d failure(s)\n", fails ? "FAILED" : "ALL PASSED", fails);
     return fails ? 1 : 0;
 }
