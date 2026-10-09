@@ -61,7 +61,10 @@ jobs:
         run: |
           curl -fsSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip
           unzip -q pluginval.zip -d pluginval
-          ./pluginval/pluginval.exe --strictness-level 5 --skip-gui-tests --validate-in-process --output-dir pluginval-logs --validate "bin/TrapLimit.vst3"
+          set +e
+          ./pluginval/pluginval.exe --strictness-level 5 --skip-gui-tests --validate-in-process --output-dir pluginval-logs --validate "bin/TrapLimit.vst3" > pv.txt 2>&1
+          rc=$?
+          bash scripts/report-pluginval.sh pv.txt $rc
       - name: Stage files
         run: |
           V="${APP_VERSION}"; [ "$V" = "dev" ] && V="2.5"; V="${V#v}"
@@ -118,7 +121,10 @@ jobs:
         run: |
           curl -fsSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
           unzip -q pluginval.zip -d pluginval
-          ./pluginval/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process --output-dir pluginval-logs --validate bin/TrapLimit.vst3
+          set +e
+          ./pluginval/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process --output-dir pluginval-logs --validate bin/TrapLimit.vst3 > pv.txt 2>&1
+          rc=$?
+          bash scripts/report-pluginval.sh pv.txt $rc
       - name: Import Apple signing certificates
         env:
           MACOS_CERT_APP_P12: ${{ secrets.MACOS_CERT_APP_P12 }}
