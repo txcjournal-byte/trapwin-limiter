@@ -180,6 +180,7 @@ jobs:
           ditto out/mac/manual/TrapLimit.component "$D/Manual Install/TrapLimit.component"
           cp "dist/TrapWin Limiter - Manual.pdf" "dist/EULA.txt" "dist/THIRD-PARTY-LICENSES.txt" "$D/"
           sed "s/@VERSION@/$V/g" "dist/README - INSTALL (macOS).txt" > "$D/README - INSTALL.txt"
+          [ -z "$SUFFIX" ] || cat dist/MAC_UNSIGNED_NOTE.txt >> "$D/README - INSTALL.txt"
           (cd out/zip && ditto -c -k --sequesterRsrc --keepParent "$N" "../release/${N}${SUFFIX}.zip")
           unzip -l "out/release/${N}${SUFFIX}.zip"
       - uses: actions/upload-artifact@v4

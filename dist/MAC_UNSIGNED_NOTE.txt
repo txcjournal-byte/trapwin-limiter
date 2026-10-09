@@ -1,0 +1,12 @@
+
+IF macOS BLOCKS THE INSTALLER ("cannot be opened" / "unidentified developer")
+  This build is not yet notarized by Apple. To install it anyway:
+  1. Double-click the .pkg once and close the warning.
+  2. Open System Settings > Privacy & Security, scroll down and click
+     "Open Anyway" next to TrapWin_Limiter...pkg, then confirm.
+  3. Manual install: if your DAW does not load the plugin, open Terminal and run
+       sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/VST3/TrapLimit.vst3
+       sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/Components/TrapLimit.component
+
+  CESKY: macOS blokuje instalator -> Nastaveni systemu > Soukromi a zabezpeceni >
+  "Presto otevrit" u TrapWin_Limiter...pkg.
