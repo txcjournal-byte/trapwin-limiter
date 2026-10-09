@@ -12,4 +12,7 @@ if [ "$rc" != "0" ]; then
   echo "::error title=pluginval tail::$(tail -c 3000 "$log" | tr '\n' '|' )"
   exit "$rc"
 fi
+tests=$(grep -c "Starting tests in" "$log")
+summary=$(grep -E "SUCCESS|ALL TESTS PASSED|Finished validating" "$log" | tr '\n' ' ' | cut -c1-500)
+echo "::notice title=pluginval passed::$tests test groups run. $summary"
 echo "pluginval passed"
