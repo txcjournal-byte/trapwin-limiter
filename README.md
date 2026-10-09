@@ -12,7 +12,7 @@ Všechno dělá GitHub sám (`.github/workflows/build.yml`):
 | Kdy | Co se stane |
 |---|---|
 | každý push do `main` | otestuje zvuk, sestaví Windows i Mac verzi, ověří plugin (pluginval, auval) a hotové soubory nechá ke stažení v záložce **Actions** → poslední běh → **Artifacts** |
-| push tagu `v2.5` | to samé + vytvoří **Release** s hotovými soubory pro zákazníky |
+| **Actions → Build TrapWin Limiter → Run workflow**, vyplníš verzi (např. `2.5`) | to samé + vytvoří **Release** s hotovými soubory pro zákazníky (stejně funguje i push tagu `v2.5`) |
 
 Soubory pro zákazníky (Release):
 - `TrapWin_Limiter_v2.5_Windows_Setup.exe` – instalátor pro Windows
@@ -21,7 +21,7 @@ Soubory pro zákazníky (Release):
 - `TrapWin Limiter - Manual.pdf`
 
 Nová verze: změň číslo v `plugin/TrapLimitPlugin.cpp` (`d_version`) a nápis `"v2.5"` v
-`plugin/TrapWinBetonUI.cpp`, pak vytvoř tag stejného čísla (Releases → Draft a new release → tag `v2.6`).
+`plugin/TrapWinBetonUI.cpp`, pak spusť **Run workflow** s verzí `2.6`.
 
 ## Mac: podpis a notarizace (nutné pro prodej)
 

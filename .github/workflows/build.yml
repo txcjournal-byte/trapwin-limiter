@@ -8,12 +8,17 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Publish a release with this version, e.g. 2.5 (leave empty for a test build)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
 
 env:
-  APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'dev' }}
+  APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || (inputs.release_version != '' && format('v{0}', inputs.release_version)) || 'dev' }}
 
 jobs:
   # ------------------------------------------------------------------ DSP tests
@@ -170,7 +175,7 @@ jobs:
 
   # ------------------------------------------------------------------ Release (only for tags v*)
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
     needs: [test-dsp, windows-package, macos]
     runs-on: ubuntu-24.04
     steps:
@@ -186,4 +191,5 @@ jobs:
         run: |
           cp "dist/TrapWin Limiter - Manual.pdf" release/
           ls -la release
-          gh release create "$GITHUB_REF_NAME" release/* --title "TrapWin Limiter ${GITHUB_REF_NAME}" --notes "Windows: Setup.exe (installer) or .zip (manual install). macOS: .pkg installer (Intel + Apple Silicon)."
+          TAG="${APP_VERSION}"
+          gh release create "$TAG" release/* --target "$GITHUB_SHA" --title "TrapWin Limiter ${TAG}" --notes "Windows: Setup.exe (installer) or .zip (manual install). macOS: .pkg installer (Intel + Apple Silicon)."
