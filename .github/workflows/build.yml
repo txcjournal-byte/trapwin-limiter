@@ -1,7 +1,11 @@
 name: Build TrapWin Limiter
 
-# Runs on every push. Pushing a tag like v2.5 also publishes a GitHub Release
-# with the finished customer files (Windows installer + ZIP, macOS installer).
+# Every push to main: tests + both customer ZIPs as build artifacts.
+# Actions > Build TrapWin Limiter > Run workflow with "publish = yes" (or a tag v1.0.0) also
+# publishes a GitHub Release v<VERSION> with the two customer ZIPs:
+#   TrapWin_Limiter_v<VERSION>_Windows.zip
+#   TrapWin_Limiter_v<VERSION>_macOS.zip   (or ..._macOS_NEPODEPSANO.zip when the Apple secrets are missing)
+# The version comes from the VERSION file.
 on:
   push:
     branches: [main]
@@ -9,24 +13,26 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      release_version:
-        description: 'Publish a release with this version, e.g. 2.5 (leave empty for a test build)'
+      publish:
+        description: 'Publish GitHub Release v<VERSION> with the customer ZIPs (yes/no)'
         required: false
-        default: ''
+        default: 'no'
 
 permissions:
   contents: write
 
-env:
-  APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || (inputs.release_version != '' && format('v{0}', inputs.release_version)) || 'dev' }}
-
 jobs:
-  # ------------------------------------------------------------------ DSP tests
+  # ------------------------------------------------------------------ tests
   test-dsp:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Build and run DSP tests
+      - name: Version consistency (VERSION file = plugin d_version = UI label)
+        run: |
+          V=$(tr -d ' \r\n' < VERSION); IFS=. read -r MA MI PA <<< "$V"
+          grep -q "d_version($MA, $MI, $PA)" plugin/TrapLimitPlugin.cpp || { echo "::error::plugin/TrapLimitPlugin.cpp d_version does not match VERSION $V"; exit 1; }
+          grep -q "\"v$MA.$MI\"" plugin/TrapWinBetonUI.cpp || { echo "::error::UI version label does not match VERSION $V"; exit 1; }
+      - name: DSP tests
         working-directory: test
         run: |
           g++ -std=c++17 -O2 -I../plugin -I../dpf/distrho -I../dpf/distrho/src dsptest.cpp -o dsptest -lpthread -ldl
@@ -43,7 +49,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Cross-compile VST3 + CLAP (llvm-mingw)
+      - name: Cross-compile VST3 (llvm-mingw)
         run: scripts/build-windows.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -67,38 +73,36 @@ jobs:
           curl -fsSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip
           unzip -q pluginval.zip -d pluginval
           set +e
-          ./pluginval/pluginval.exe --strictness-level 5 --skip-gui-tests --validate-in-process --output-dir pluginval-logs --validate "bin/TrapLimit.vst3" > pv.txt 2>&1
+          ./pluginval/pluginval.exe --strictness-level 5 --skip-gui-tests --validate-in-process --validate "bin/TrapLimit.vst3" > pv.txt 2>&1
           rc=$?
           bash scripts/report-pluginval.sh pv.txt $rc
-      - name: Stage files
+      - name: Stage installer files
         run: |
-          V="${APP_VERSION}"; [ "$V" = "dev" ] && V="2.5"; V="${V#v}"
-          echo "V=$V" >> "$GITHUB_ENV"
+          V=$(tr -d ' \r\n' < VERSION); echo "V=$V" >> "$GITHUB_ENV"
           S="out/stage-win"; mkdir -p "$S"
-          cp -r bin/TrapLimit.vst3 bin/TrapLimit.clap "$S/"
-          cp "dist/EULA.txt" "dist/README - INSTALL.txt" "dist/THIRD-PARTY-LICENSES.txt" "dist/TrapWin Limiter - Manual.pdf" "$S/"
+          cp -r bin/TrapLimit.vst3 "$S/"
+          cp "dist/EULA.txt" "dist/THIRD-PARTY-LICENSES.txt" "dist/TrapWin Limiter - Manual.pdf" "$S/"
       - name: Build installer (Inno Setup)
         shell: pwsh
         run: |
           if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:V /DSrcDir="$PWD\out\stage-win" /DOutDir="$PWD\out\release" installer\windows\TrapWinLimiter.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:V /DSrcDir="$PWD\out\stage-win" /DOutDir="$PWD\out\setup" installer\windows\TrapWinLimiter.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
-      - name: ZIP for manual install
-        shell: pwsh
+      - name: Assemble customer ZIP (Windows)
         run: |
-          $n = "TrapWin_Limiter_v$($env:V)_Windows"
-          New-Item -ItemType Directory -Force -Path "out\zip\$n" | Out-Null
-          Copy-Item -Recurse out\stage-win\* "out\zip\$n\"
-          Compress-Archive -Path "out\zip\$n" -DestinationPath "out\release\$n.zip"
+          N="TrapWin_Limiter_v${V}_Windows"; D="out/zip/$N"
+          mkdir -p "$D/Manual Install" out/release
+          cp "out/setup/TrapWin_Limiter_v${V}_Windows_Setup.exe" "$D/"
+          cp -r bin/TrapLimit.vst3 "$D/Manual Install/"
+          cp "dist/TrapWin Limiter - Manual.pdf" "dist/EULA.txt" "dist/THIRD-PARTY-LICENSES.txt" "$D/"
+          sed "s/@VERSION@/$V/g" "dist/README - INSTALL (Windows).txt" | sed 's/$/\r/' > "$D/README - INSTALL.txt"
+          (cd out/zip && 7z a -tzip -mx=9 "../release/$N.zip" "$N" > /dev/null)
+          7z l "out/release/$N.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-windows
-          path: out/release/
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pluginval-windows-logs
-          path: pluginval-logs/
+          name: customer-windows
+          path: out/release/*.zip
+          if-no-files-found: error
 
   # ------------------------------------------------------------------ macOS
   macos:
@@ -109,87 +113,104 @@ jobs:
       LDFLAGS: -arch x86_64 -arch arm64 -mmacosx-version-min=10.15
     steps:
       - uses: actions/checkout@v4
-      - name: Build universal VST3 + AU + CLAP
+      - name: Build universal VST3 + AU
         run: |
-          make -C plugin -j"$(sysctl -n hw.ncpu)"
-          ls -la bin
-          lipo -info bin/TrapLimit.vst3/Contents/MacOS/TrapLimit bin/TrapLimit.component/Contents/MacOS/TrapLimit
+          make -C plugin vst3 au -j"$(sysctl -n hw.ncpu)"
+          for b in bin/TrapLimit.vst3/Contents/MacOS/TrapLimit bin/TrapLimit.component/Contents/MacOS/TrapLimit; do
+            lipo -info "$b"
+            lipo "$b" -verify_arch arm64 x86_64 || { echo "::error title=Universal binary::$b is not arm64+x86_64: $(lipo -archs "$b")"; exit 1; }
+          done
       - name: Validate Audio Unit (auval)
         run: |
           mkdir -p ~/Library/Audio/Plug-Ins/Components
-          cp -R bin/TrapLimit.component ~/Library/Audio/Plug-Ins/Components/
+          ditto bin/TrapLimit.component ~/Library/Audio/Plug-Ins/Components/TrapLimit.component
           killall -9 AudioComponentRegistrar || true
-          sleep 2
-          auval -a | grep -i trapwin || true
-          auval -strict -v aufx TrLm TrVs
+          sleep 3
+          auval -strict -v aufx TrLm TrVs > auval.log 2>&1 && rc=0 || rc=$?
+          tail -30 auval.log
+          if [ $rc -ne 0 ]; then grep -iE 'FAIL|ERROR' auval.log | head -10 | sed 's/^/::error title=auval::/'; exit 1; fi
+          echo "::notice title=auval::$(grep -E 'AU VALIDATION SUCCEEDED|VALIDATION' auval.log | tail -1)"
       - name: Validate VST3 with pluginval
         run: |
           curl -fsSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
           unzip -q pluginval.zip -d pluginval
           set +e
-          ./pluginval/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process --output-dir pluginval-logs --validate bin/TrapLimit.vst3 > pv.txt 2>&1
+          ./pluginval/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process --validate bin/TrapLimit.vst3 > pv.txt 2>&1
           rc=$?
           bash scripts/report-pluginval.sh pv.txt $rc
       - name: Import Apple signing certificates
         env:
-          MACOS_CERT_APP_P12: ${{ secrets.MACOS_CERT_APP_P12 }}
-          MACOS_CERT_INSTALLER_P12: ${{ secrets.MACOS_CERT_INSTALLER_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-        if: env.MACOS_CERT_APP_P12 != '' && env.MACOS_CERT_INSTALLER_P12 != ''
+          MAC_CERT_APP_P12: ${{ secrets.MAC_CERT_APP_P12 }}
+          MAC_CERT_INSTALLER_P12: ${{ secrets.MAC_CERT_INSTALLER_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        if: env.MAC_CERT_APP_P12 != '' && env.MAC_CERT_INSTALLER_P12 != ''
         run: |
           KC="$RUNNER_TEMP/build.keychain"; KCPW="$(uuidgen)"
           security create-keychain -p "$KCPW" "$KC"
           security set-keychain-settings -lut 21600 "$KC"
           security unlock-keychain -p "$KCPW" "$KC"
           security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
-          echo "$MACOS_CERT_APP_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
-          echo "$MACOS_CERT_INSTALLER_P12" | base64 --decode > "$RUNNER_TEMP/inst.p12"
-          security import "$RUNNER_TEMP/app.p12"  -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
-          security import "$RUNNER_TEMP/inst.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
+          echo "$MAC_CERT_APP_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
+          echo "$MAC_CERT_INSTALLER_P12" | base64 --decode > "$RUNNER_TEMP/inst.p12"
+          security import "$RUNNER_TEMP/app.p12"  -k "$KC" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
+          security import "$RUNNER_TEMP/inst.p12" -k "$KC" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" > /dev/null
           rm -f "$RUNNER_TEMP"/*.p12
           APP_ID=$(security find-identity -v -p codesigning "$KC" | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)"/\1/')
           INST_ID=$(security find-identity -v "$KC" | grep "Developer ID Installer" | head -1 | sed -E 's/.*"(.*)"/\1/')
+          [ -n "$APP_ID" ] && [ -n "$INST_ID" ] || { echo "::error title=Apple certificates::Developer ID Application/Installer identity not found in the imported .p12 files"; exit 1; }
           echo "MACOS_SIGN_APP=$APP_ID" >> "$GITHUB_ENV"
           echo "MACOS_SIGN_INSTALLER=$INST_ID" >> "$GITHUB_ENV"
-          echo "Signing as: $APP_ID / $INST_ID"
-      - name: Build installer (.pkg), sign and notarize
+          echo "::notice title=Apple certificates::signing as $APP_ID"
+      - name: Build installer (.pkg) + manual-install bundles, sign and notarize
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          V="${APP_VERSION}"; [ "$V" = "dev" ] && V="2.5"; V="${V#v}"
-          installer/macos/build_pkg.sh "$V" dist out/release
-          cp "dist/TrapWin Limiter - Manual.pdf" out/release/
+          V=$(tr -d ' \r\n' < VERSION); echo "V=$V" >> "$GITHUB_ENV"
+          installer/macos/build_pkg.sh "$V" dist out/mac
+      - name: Assemble customer ZIP (macOS)
+        run: |
+          SUFFIX=""; [ "$(cat out/mac/signed.txt)" = "yes" ] || SUFFIX="_NEPODEPSANO"
+          N="TrapWin_Limiter_v${V}_macOS"; D="out/zip/$N"
+          mkdir -p "$D/Manual Install" out/release
+          ditto "out/mac/TrapWin_Limiter_v${V}_macOS.pkg" "$D/TrapWin_Limiter_v${V}_macOS.pkg"
+          ditto out/mac/manual/TrapLimit.vst3 "$D/Manual Install/TrapLimit.vst3"
+          ditto out/mac/manual/TrapLimit.component "$D/Manual Install/TrapLimit.component"
+          cp "dist/TrapWin Limiter - Manual.pdf" "dist/EULA.txt" "dist/THIRD-PARTY-LICENSES.txt" "$D/"
+          sed "s/@VERSION@/$V/g" "dist/README - INSTALL (macOS).txt" > "$D/README - INSTALL.txt"
+          (cd out/zip && ditto -c -k --sequesterRsrc --keepParent "$N" "../release/${N}${SUFFIX}.zip")
+          unzip -l "out/release/${N}${SUFFIX}.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-macos
-          path: |
-            out/release/*.pkg
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pluginval-macos-logs
-          path: pluginval-logs/
+          name: customer-macos
+          path: out/release/*.zip
+          if-no-files-found: error
 
-  # ------------------------------------------------------------------ Release (only for tags v*)
+  # ------------------------------------------------------------------ GitHub Release with both customer ZIPs
   release:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish == 'yes')
     needs: [test-dsp, windows-package, macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: release-*
+          pattern: customer-*
           merge-multiple: true
           path: release
-      - name: Publish GitHub Release
+      - name: Publish GitHub Release v<VERSION>
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp "dist/TrapWin Limiter - Manual.pdf" release/
+          V=$(tr -d ' \r\n' < VERSION); TAG="v$V"
           ls -la release
-          TAG="${APP_VERSION}"
-          gh release create "$TAG" release/* --target "$GITHUB_SHA" --title "TrapWin Limiter ${TAG}" --notes "Windows: Setup.exe (installer) or .zip (manual install). macOS: .pkg installer (Intel + Apple Silicon)."
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # replace old customer files (e.g. an unsigned macOS ZIP after the Apple secrets were added)
+            for a in $(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name'); do gh release delete-asset "$TAG" "$a" -R "$GITHUB_REPOSITORY" -y; done
+            gh release upload "$TAG" release/*.zip -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" release/*.zip -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "TrapWin Limiter $TAG" \
+              --notes "Customer files: Windows ZIP (installer + manual install) and macOS ZIP (installer + manual install)."
+          fi

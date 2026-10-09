@@ -1,49 +1,67 @@
 #!/usr/bin/env bash
-# Builds the macOS installer package (VST3 + AU + CLAP) from ./bin.
-# Signing + notarization run only when these environment variables are set:
-#   MACOS_SIGN_APP        "Developer ID Application: Name (TEAMID)"
+# Builds the macOS installer (.pkg with VST3 + AU) and the signed "Manual Install" bundles from ./bin.
+# Signing + notarization run only when these environment variables are set (see .github/workflows/build.yml):
+#   MACOS_SIGN_APP        "Developer ID Application: Name (TEAMID)"   (identity in the keychain)
 #   MACOS_SIGN_INSTALLER  "Developer ID Installer: Name (TEAMID)"
-#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD   (for notarytool)
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD                         (notarytool)
 # Usage: installer/macos/build_pkg.sh <version> <docs dir> <output dir>
+# Output: <output dir>/TrapWin_Limiter_v<version>_macOS.pkg, <output dir>/manual/{TrapLimit.vst3,TrapLimit.component}
+#         and SIGNED=yes|no written to <output dir>/signed.txt
 set -euo pipefail
+trap 'echo "::error title=build_pkg.sh::line $LINENO failed: $BASH_COMMAND"' ERR
 VERSION="$1"; DOCS="$2"; OUT="$3"
 cd "$(dirname "$0")/../.."
 ROOT="$PWD"; WORK="$ROOT/out/macpkg"; rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
 ID="com.trapwin.traplimit"
+CAN_NOTARIZE=no
+if [ -n "${MACOS_SIGN_APP:-}" ] && [ -n "${MACOS_SIGN_INSTALLER:-}" ] && [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+  CAN_NOTARIZE=yes
+fi
 
-# ---- sign the plugin bundles (hardened runtime is required for notarization)
-for b in bin/TrapLimit.vst3 bin/TrapLimit.component bin/TrapLimit.clap; do
+# ---- sign the plugin bundles (hardened runtime + timestamp are required for notarization)
+BUNDLES=(bin/TrapLimit.vst3 bin/TrapLimit.component)
+for b in "${BUNDLES[@]}"; do
   if [ -n "${MACOS_SIGN_APP:-}" ]; then
     codesign --force --deep --timestamp --options runtime --sign "$MACOS_SIGN_APP" "$b"
   else
-    codesign --force --deep --sign - "$b"     # ad-hoc (unsigned build, for testing only)
+    codesign --force --deep --sign - "$b"     # ad-hoc: unsigned build, for testing only
   fi
   codesign --verify --strict --verbose=2 "$b"
 done
 
-# ---- one component package per format
+# ---- notarize the bundles themselves too, so the "Manual Install" copies pass Gatekeeper
+if [ "$CAN_NOTARIZE" = yes ]; then
+  ditto -c -k --keepParent bin/TrapLimit.vst3 "$WORK/vst3.zip"
+  ditto -c -k --keepParent bin/TrapLimit.component "$WORK/au.zip"
+  for z in vst3 au; do
+    xcrun notarytool submit "$WORK/$z.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+  done
+  for b in "${BUNDLES[@]}"; do xcrun stapler staple "$b"; done
+fi
+mkdir -p "$OUT/manual"
+for b in "${BUNDLES[@]}"; do ditto "$b" "$OUT/manual/$(basename "$b")"; done
+
+# ---- component packages
 mk() { # name bundle install-location
   local name="$1" bundle="$2" loc="$3"
-  mkdir -p "$WORK/root-$name"; cp -R "$bundle" "$WORK/root-$name/"
+  mkdir -p "$WORK/root-$name"; ditto "$bundle" "$WORK/root-$name/$(basename "$bundle")"
   pkgbuild --root "$WORK/root-$name" --identifier "$ID.$name" --version "$VERSION" \
            --install-location "$loc" "$WORK/$name.pkg"
 }
 mk vst3 bin/TrapLimit.vst3      "/Library/Audio/Plug-Ins/VST3"
 mk au   bin/TrapLimit.component "/Library/Audio/Plug-Ins/Components"
-mk clap bin/TrapLimit.clap      "/Library/Audio/Plug-Ins/CLAP"
 
-# ---- distribution with selectable formats, EULA and readme
+# ---- distribution: selectable formats, EULA, readme
 mkdir -p "$WORK/res"
 cp "$DOCS/EULA.txt" "$WORK/res/EULA.txt"
 cat > "$WORK/res/README.txt" <<EOF
 TrapWin Limiter $VERSION for macOS (Intel + Apple Silicon)
 
 This installer copies the plugin to:
-  VST3: /Library/Audio/Plug-Ins/VST3/TrapLimit.vst3
-  AU:   /Library/Audio/Plug-Ins/Components/TrapLimit.component  (Logic Pro, GarageBand)
-  CLAP: /Library/Audio/Plug-Ins/CLAP/TrapLimit.clap
+  VST3:            /Library/Audio/Plug-Ins/VST3/TrapLimit.vst3
+  Audio Unit (AU): /Library/Audio/Plug-Ins/Components/TrapLimit.component  (Logic Pro, GarageBand)
 
-After installing, restart your DAW (Logic rescans Audio Units automatically).
+After installing, restart your DAW (Logic Pro rescans Audio Units automatically).
 EOF
 cat > "$WORK/distribution.xml" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
@@ -55,14 +73,12 @@ cat > "$WORK/distribution.xml" <<EOF
   <domains enable_localSystem="true"/>
   <os-version min="10.15"/>
   <choices-outline>
-    <line choice="vst3"/><line choice="au"/><line choice="clap"/>
+    <line choice="vst3"/><line choice="au"/>
   </choices-outline>
   <choice id="vst3" title="VST3" description="For Ableton Live, FL Studio, Cubase, Studio One, Reaper and other VST3 hosts."><pkg-ref id="$ID.vst3"/></choice>
-  <choice id="au" title="Audio Unit (AU)" description="For Logic Pro, GarageBand and other AU hosts."><pkg-ref id="$ID.au"/></choice>
-  <choice id="clap" title="CLAP" description="For Bitwig, Reaper and other CLAP hosts."><pkg-ref id="$ID.clap"/></choice>
+  <choice id="au" title="Audio Unit (AU)" description="For Logic Pro, GarageBand and other Audio Unit hosts."><pkg-ref id="$ID.au"/></choice>
   <pkg-ref id="$ID.vst3" version="$VERSION">vst3.pkg</pkg-ref>
   <pkg-ref id="$ID.au" version="$VERSION">au.pkg</pkg-ref>
-  <pkg-ref id="$ID.clap" version="$VERSION">clap.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 
@@ -71,13 +87,16 @@ SIGNARGS=()
 [ -n "${MACOS_SIGN_INSTALLER:-}" ] && SIGNARGS=(--sign "$MACOS_SIGN_INSTALLER" --timestamp)
 productbuild --distribution "$WORK/distribution.xml" --resources "$WORK/res" --package-path "$WORK" ${SIGNARGS[@]+"${SIGNARGS[@]}"} "$PKG"
 
-# ---- notarize + staple
-if [ -n "${MACOS_SIGN_INSTALLER:-}" ] && [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+# ---- notarize + staple the installer
+if [ "$CAN_NOTARIZE" = yes ]; then
   xcrun notarytool submit "$PKG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
   xcrun stapler staple "$PKG"
   spctl --assess --type install --verbose "$PKG"
-  echo "NOTARIZED=yes"
+  for b in "$OUT"/manual/*; do spctl --assess --type execute --verbose "$b" || spctl -a -vvv -t install "$b" || true; done
+  echo "yes" > "$OUT/signed.txt"
+  echo "::notice title=macOS signing::signed and notarized"
 else
-  echo "NOTARIZED=no  (no Apple certificates configured - this package is for testing only)"
+  echo "no" > "$OUT/signed.txt"
+  echo "::warning title=macOS signing::NOT signed/notarized - add the Apple secrets (MAC_CERT_APP_P12, MAC_CERT_INSTALLER_P12, MAC_CERT_PASSWORD, APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD) before selling"
 fi
-ls -la "$PKG"
+ls -la "$OUT" "$OUT/manual"

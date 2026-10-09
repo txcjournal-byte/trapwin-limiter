@@ -7,21 +7,18 @@ Postaveno na [DPF](https://github.com/DISTRHO/DPF) (ve složce `dpf/`).
 
 ## Jak se staví nová verze
 
-Všechno dělá GitHub sám (`.github/workflows/build.yml`):
+Všechno dělá GitHub sám (`.github/workflows/build.yml`). Číslo verze je v souboru `VERSION`
+(a musí sedět s `d_version` v `plugin/TrapLimitPlugin.cpp` a nápisem v `plugin/TrapWinBetonUI.cpp` – CI to hlídá).
 
 | Kdy | Co se stane |
 |---|---|
-| každý push do `main` | otestuje zvuk, sestaví Windows i Mac verzi, ověří plugin (pluginval, auval) a hotové soubory nechá ke stažení v záložce **Actions** → poslední běh → **Artifacts** |
-| **Actions → Build TrapWin Limiter → Run workflow**, vyplníš verzi (např. `2.5`) | to samé + vytvoří **Release** s hotovými soubory pro zákazníky (stejně funguje i push tagu `v2.5`) |
+| každý push do `main` | testy zvuku, sestavení Windows + Mac, pluginval, auval, oba zákaznické ZIPy jako Artifacts |
+| **Actions → Build TrapWin Limiter → Run workflow**, `publish = yes` | to samé + **Release v&lt;VERSION&gt;** se dvěma ZIPy pro e-shop |
 
-Soubory pro zákazníky (Release):
-- `TrapWin_Limiter_v2.5_Windows_Setup.exe` – instalátor pro Windows
-- `TrapWin_Limiter_v2.5_Windows.zip` – ruční instalace (přetáhnout do složky VST3)
-- `TrapWin_Limiter_v2.5_macOS.pkg` – instalátor pro Mac (Intel + Apple Silicon; VST3, AU, CLAP)
-- `TrapWin Limiter - Manual.pdf`
-
-Nová verze: změň číslo v `plugin/TrapLimitPlugin.cpp` (`d_version`) a nápis `"v2.5"` v
-`plugin/TrapWinBetonUI.cpp`, pak spusť **Run workflow** s verzí `2.6`.
+Zákaznické ZIPy (dvě varianty v e-shopu):
+- `TrapWin_Limiter_v1.0.0_Windows.zip` – instalátor .exe, složka Manual Install (VST3), manuál PDF, EULA, licence, návod
+- `TrapWin_Limiter_v1.0.0_macOS.zip` – instalátor .pkg (VST3 + AU), složka Manual Install (VST3 + AU), manuál PDF, EULA, licence, návod.
+  Bez Apple údajů se jmenuje `..._macOS_NEPODEPSANO.zip` a **nesmí se prodávat**.
 
 ## Mac: podpis a notarizace (nutné pro prodej)
 
@@ -31,14 +28,14 @@ exportuj je z Klíčenky jako `.p12` a v GitHubu (Settings → Secrets and varia
 
 | Secret | Obsah |
 |---|---|
-| `MACOS_CERT_APP_P12` | Developer ID Application `.p12` převedený do base64 (`base64 -i app.p12 \| pbcopy`) |
-| `MACOS_CERT_INSTALLER_P12` | Developer ID Installer `.p12` v base64 |
-| `MACOS_CERT_PASSWORD` | heslo, které jsi zadal při exportu `.p12` |
+| `MAC_CERT_APP_P12` | Developer ID Application `.p12` převedený do base64 (`base64 -i app.p12 \| pbcopy`) |
+| `MAC_CERT_INSTALLER_P12` | Developer ID Installer `.p12` v base64 |
+| `MAC_CERT_PASSWORD` | heslo, které jsi zadal při exportu `.p12` |
 | `APPLE_ID` | e-mail tvého Apple ID |
 | `APPLE_TEAM_ID` | Team ID (10 znaků, najdeš v developer.apple.com → Membership) |
 | `APPLE_APP_PASSWORD` | heslo pro aplikace z appleid.apple.com → Sign-In and Security → App-Specific Passwords |
 
-Jakmile tam jsou, každé sestavení Mac verzi samo podepíše, notarizuje a „sešije“ (staple).
+Názvy jsou stejné jako u TW-7 (trapwin-tw7-dynamic-eq). Secrets se nastavují pro každý repozitář zvlášť. Jakmile tam jsou, každé sestavení Mac verzi samo podepíše, notarizuje a „sešije“ (staple).
 Dokud tam nejsou, Mac instalátor je jen na testování.
 
 ## Lokální sestavení

@@ -38,7 +38,7 @@ ol,ul{margin:0 0 8pt 16pt;padding:0;} li{margin:2pt 0;}
   <h1>TrapWin Limiter</h1>
   <div class="sub">TW-2 clipper &amp; true-peak limiter for trap and underground music</div>
   <img src="ui_main.png" alt="TrapWin Limiter user interface">
-  <div class="ver">USER MANUAL · VERSION 2.5 · WINDOWS &amp; MACOS · VST3 / AU / CLAP</div>
+  <div class="ver">USER MANUAL · VERSION 1.0.0 · WINDOWS &amp; MACOS · VST3 / AU</div>
 </div>
 
 <h2>1. What it is</h2>
@@ -55,18 +55,19 @@ ol,ul{margin:0 0 8pt 16pt;padding:0;} li{margin:2pt 0;}
 <h3>Windows</h3>
 <ol>
   <li>Close your DAW.</li>
-  <li>Run <span class="mono">TrapWin_Limiter_Windows_Setup.exe</span> and follow the steps. It installs the VST3 (and optionally CLAP) into the standard plugin folders.</li>
-  <li><i>Manual install instead:</i> copy the folder <span class="mono">TrapLimit.vst3</span> from the ZIP into <span class="mono">C:\Program Files\Common Files\VST3\</span> (and optionally <span class="mono">TrapLimit.clap</span> into <span class="mono">C:\Program Files\Common Files\CLAP\</span>).</li>
+  <li>Run <span class="mono">TrapWin_Limiter_v1.0.0_Windows_Setup.exe</span> and follow the steps. It installs the VST3 into the standard plugin folder.</li>
+  <li><i>Manual install instead:</i> copy the folder <span class="mono">Manual Install\TrapLimit.vst3</span> into <span class="mono">C:\Program Files\Common Files\VST3\</span>.</li>
   <li>Start your DAW and rescan plugins (FL Studio: <i>Options › Manage plugins › Find installed plugins</i>).</li>
 </ol>
 <h3>macOS</h3>
 <ol>
   <li>Close your DAW.</li>
-  <li>Double-click <span class="mono">TrapWin_Limiter_macOS.pkg</span> and follow the installer. Choose which formats to install: VST3, Audio Unit (AU, needed for Logic Pro and GarageBand) and CLAP.</li>
+  <li>Double-click <span class="mono">TrapWin_Limiter_v1.0.0_macOS.pkg</span> and follow the installer. Choose which formats to install: VST3 and/or Audio Unit (AU, needed for Logic Pro and GarageBand).</li>
+  <li><i>Manual install instead:</i> from the <span class="mono">Manual Install</span> folder copy <span class="mono">TrapLimit.vst3</span> to <span class="mono">/Library/Audio/Plug-Ins/VST3/</span> and <span class="mono">TrapLimit.component</span> to <span class="mono">/Library/Audio/Plug-Ins/Components/</span>.</li>
   <li>Start your DAW. Logic Pro scans new Audio Units automatically; in other hosts rescan plugins.</li>
 </ol>
 <p>Load <b>TrapWin Limiter</b> (vendor TrapWin) as the last plugin on your master or on a bus.</p>
-<p class="small">Requirements: Windows 10 or 11 (64-bit) or macOS 10.15 or newer (Intel or Apple Silicon, native); a 64-bit VST3, AU or CLAP host; OpenGL graphics. Sample rates from 44.1 kHz to 192 kHz are supported.</p>
+<p class="small">Requirements: Windows 10 or 11 (64-bit) or macOS 10.15 or newer (Intel or Apple Silicon, native); a 64-bit VST3 or AU host; OpenGL graphics. Sample rates from 44.1 kHz to 192 kHz are supported.</p>
 
 <h2>3. Quick start: a loud trap master in one minute</h2>
 <ol>
@@ -189,7 +190,7 @@ ol,ul{margin:0 0 8pt 16pt;padding:0;} li{margin:2pt 0;}
 
 <div style="break-inside:avoid"><h2>8. Technical data</h2>
 <table>
-<tr><td>Formats</td><td colspan="2">Windows 10/11 64-bit: VST3, CLAP · macOS 10.15+ (Intel + Apple Silicon): VST3, AU, CLAP</td></tr>
+<tr><td>Formats</td><td colspan="2">Windows 10/11 64-bit: VST3 · macOS 10.15+ (Intel + Apple Silicon): VST3, AU</td></tr>
 <tr><td>Channels</td><td colspan="2">Stereo in / stereo out</td></tr>
 <tr><td>Sample rates</td><td colspan="2">44.1 kHz to 192 kHz</td></tr>
 <tr><td>Latency</td><td colspan="2">Constant, reported to the host for automatic delay compensation: 294 samples (6.1 ms) at 48 kHz, 275 samples at 44.1 kHz. It does not change with oversampling or lookahead settings.</td></tr>
@@ -199,7 +200,7 @@ ol,ul{margin:0 0 8pt 16pt;padding:0;} li{margin:2pt 0;}
 
 </div><div style="break-inside:avoid"><h2>9. Troubleshooting</h2>
 <table>
-<tr><td>Plugin not found</td><td colspan="2">Windows: check that the folder is <span class="mono">C:\Program Files\Common Files\VST3\TrapLimit.vst3</span>. macOS: plugins are in <span class="mono">/Library/Audio/Plug-Ins/</span> (VST3, Components, CLAP). Then rescan plugins in your DAW. In FL Studio, enable "Rescan previously verified plugins".</td></tr>
+<tr><td>Plugin not found</td><td colspan="2">Windows: check that the folder is <span class="mono">C:\Program Files\Common Files\VST3\TrapLimit.vst3</span>. macOS: plugins are in <span class="mono">/Library/Audio/Plug-Ins/VST3</span> and <span class="mono">/Library/Audio/Plug-Ins/Components</span>. Then rescan plugins in your DAW. In FL Studio, enable "Rescan previously verified plugins".</td></tr>
 <tr><td>Plugin listed twice</td><td colspan="2">An older copy is installed in another folder. Delete the old one and rescan.</td></tr>
 <tr><td>Window too big or small</td><td colspan="2">Drag the window corner to resize. The size adapts to your Windows display scaling.</td></tr>
 <tr><td>Output quieter than expected</td><td colspan="2">STREAM PREVIEW or 0 dB MATCH is on (settings page). Turn them off before exporting.</td></tr>

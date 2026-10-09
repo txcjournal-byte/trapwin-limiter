@@ -51,7 +51,7 @@ protected:
     const char* getMaker() const override { return "TrapWin"; }
     const char* getHomePage() const override { return ""; }
     const char* getLicense() const override { return "Proprietary"; }
-    uint32_t getVersion() const override { return d_version(2, 5, 0); }
+    uint32_t getVersion() const override { return d_version(1, 0, 0); }
 
     void initAudioPort(bool input, uint32_t index, AudioPort& port) override
     {

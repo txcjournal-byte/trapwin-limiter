@@ -1,10 +1,10 @@
 ; Inno Setup script - TrapWin Limiter Windows installer
-; Build:  iscc /DAppVersion=2.5.0 /DSrcDir=<staging dir> /DOutDir=<output dir> TrapWinLimiter.iss
-; <staging dir> must contain: TrapLimit.vst3\, TrapLimit.clap, EULA.txt, README - INSTALL.txt,
+; Build:  iscc /DAppVersion=1.0.0 /DSrcDir=<staging dir> /DOutDir=<output dir> TrapWinLimiter.iss
+; <staging dir> must contain: TrapLimit.vst3\, EULA.txt,
 ;                             THIRD-PARTY-LICENSES.txt, TrapWin Limiter - Manual.pdf
 
 #ifndef AppVersion
-  #define AppVersion "2.5.0"
+  #define AppVersion "1.0.0"
 #endif
 #ifndef SrcDir
   #define SrcDir "..\..\out\stage-win"
@@ -37,18 +37,8 @@ WizardStyle=modern
 UninstallDisplayName=TrapWin Limiter
 CloseApplications=yes
 
-[Types]
-Name: "full"; Description: "VST3 + CLAP"
-Name: "vst3"; Description: "VST3 only"
-Name: "custom"; Description: "Custom"; Flags: iscustom
-
-[Components]
-Name: "vst3"; Description: "VST3 plugin (FL Studio, Ableton Live, Cubase, Studio One, Reaper ...)"; Types: full vst3 custom; Flags: fixed
-Name: "clap"; Description: "CLAP plugin (Bitwig, Reaper and other CLAP hosts)"; Types: full
-
 [Files]
-Source: "{#SrcDir}\TrapLimit.vst3\*"; DestDir: "{commoncf64}\VST3\TrapLimit.vst3"; Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SrcDir}\TrapLimit.clap"; DestDir: "{commoncf64}\CLAP"; Components: clap; Flags: ignoreversion
+Source: "{#SrcDir}\TrapLimit.vst3\*"; DestDir: "{commoncf64}\VST3\TrapLimit.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SrcDir}\TrapWin Limiter - Manual.pdf"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\EULA.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\THIRD-PARTY-LICENSES.txt"; DestDir: "{app}"; Flags: ignoreversion

@@ -470,7 +470,7 @@ protected:
         beginPath(); rect(px - 3, py, 3, ph); fillColor(Color(0, 0, 0, 0.6f)); fill();
         beginPath(); rect(px + pw, py, 3, ph); fillColor(Color(0, 0, 0, 0.6f)); fill();
         railScrew(RAIL / 2, 62); railScrew(RAIL / 2, H - 62); railScrew(W - RAIL / 2, 62); railScrew(W - RAIL / 2, H - 62);
-        monoLabel(W - RAIL / 2, H / 2, "v2.5", 12, Color(120, 124, 130));
+        monoLabel(W - RAIL / 2, H / 2, "v1.0", 12, Color(120, 124, 130));
     }
 
     void drawLeftSection()
