@@ -31,6 +31,9 @@ exportuj je z Klíčenky jako `.p12` a v GitHubu (Settings → Secrets and varia
 | `MAC_CERT_APP_P12` | Developer ID Application `.p12` převedený do base64 (`base64 -i app.p12 \| pbcopy`) |
 | `MAC_CERT_INSTALLER_P12` | Developer ID Installer `.p12` v base64 |
 | `MAC_CERT_PASSWORD` | heslo, které jsi zadal při exportu `.p12` |
+| `APPLE_API_KEY_P8` | App Store Connect API klíč (.p8) v base64 – preferovaná notarizace (pak APPLE_ID a APPLE_APP_PASSWORD nejsou potřeba) |
+| `APPLE_API_KEY_ID` | Key ID toho API klíče |
+| `APPLE_API_ISSUER_ID` | Issuer ID z App Store Connect → Users and Access → Integrations |
 | `APPLE_ID` | e-mail tvého Apple ID |
 | `APPLE_TEAM_ID` | Team ID (10 znaků, najdeš v developer.apple.com → Membership) |
 | `APPLE_APP_PASSWORD` | heslo pro aplikace z appleid.apple.com → Sign-In and Security → App-Specific Passwords |

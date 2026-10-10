@@ -3,7 +3,9 @@
 # Signing + notarization run only when these environment variables are set (see .github/workflows/build.yml):
 #   MACOS_SIGN_APP        "Developer ID Application: Name (TEAMID)"   (identity in the keychain)
 #   MACOS_SIGN_INSTALLER  "Developer ID Installer: Name (TEAMID)"
-#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD                         (notarytool)
+#   notarytool, either App Store Connect API key (preferred, same as trapwin-tw1):
+#     APPLE_API_KEY_P8 (base64 of the .p8 file), APPLE_API_KEY_ID, APPLE_API_ISSUER_ID
+#   or Apple ID: APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD
 # Usage: installer/macos/build_pkg.sh <version> <docs dir> <output dir>
 # Output: <output dir>/TrapWin_Limiter_v<version>_macOS.pkg, <output dir>/manual/{TrapLimit.vst3,TrapLimit.component}
 #         and SIGNED=yes|no written to <output dir>/signed.txt
@@ -14,9 +16,20 @@ cd "$(dirname "$0")/../.."
 ROOT="$PWD"; WORK="$ROOT/out/macpkg"; rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
 ID="com.trapwin.traplimit"
 CAN_NOTARIZE=no
-if [ -n "${MACOS_SIGN_APP:-}" ] && [ -n "${MACOS_SIGN_INSTALLER:-}" ] && [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
-  CAN_NOTARIZE=yes
+NOTARY=()
+if [ -n "${MACOS_SIGN_APP:-}" ] && [ -n "${MACOS_SIGN_INSTALLER:-}" ]; then
+  if [ -n "${APPLE_API_KEY_P8:-}" ] && [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER_ID:-}" ]; then
+    KEYFILE="$WORK/AuthKey_${APPLE_API_KEY_ID}.p8"
+    if printf '%s' "$APPLE_API_KEY_P8" | grep -q "BEGIN PRIVATE KEY"; then printf '%s\n' "$APPLE_API_KEY_P8" > "$KEYFILE"
+    else printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$KEYFILE"; fi
+    NOTARY=(--key "$KEYFILE" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
+    CAN_NOTARIZE=yes
+  elif [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+    NOTARY=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
+    CAN_NOTARIZE=yes
+  fi
 fi
+notarize() { xcrun notarytool submit "$1" "${NOTARY[@]}" --wait --timeout 30m --output-format json | tee "$WORK/notary.json"; grep -q '"status" *: *"Accepted"' "$WORK/notary.json" || { echo "::error title=notarization::$(cat "$WORK/notary.json")"; id=$(sed -nE 's/.*"id" *: *"([^"]+)".*/\1/p' "$WORK/notary.json" | head -1); [ -n "$id" ] && xcrun notarytool log "$id" "${NOTARY[@]}" || true; exit 1; }; }
 
 # ---- sign the plugin bundles (hardened runtime + timestamp are required for notarization)
 BUNDLES=(bin/TrapLimit.vst3 bin/TrapLimit.component)
@@ -34,7 +47,7 @@ if [ "$CAN_NOTARIZE" = yes ]; then
   ditto -c -k --keepParent bin/TrapLimit.vst3 "$WORK/vst3.zip"
   ditto -c -k --keepParent bin/TrapLimit.component "$WORK/au.zip"
   for z in vst3 au; do
-    xcrun notarytool submit "$WORK/$z.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+    notarize "$WORK/$z.zip"
   done
   for b in "${BUNDLES[@]}"; do xcrun stapler staple "$b"; done
 fi
@@ -89,7 +102,7 @@ productbuild --distribution "$WORK/distribution.xml" --resources "$WORK/res" --p
 
 # ---- notarize + staple the installer
 if [ "$CAN_NOTARIZE" = yes ]; then
-  xcrun notarytool submit "$PKG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+  notarize "$PKG"
   xcrun stapler staple "$PKG"
   spctl --assess --type install --verbose "$PKG"
   for b in "$OUT"/manual/*; do spctl --assess --type execute --verbose "$b" || spctl -a -vvv -t install "$b" || true; done
@@ -97,6 +110,6 @@ if [ "$CAN_NOTARIZE" = yes ]; then
   echo "::notice title=macOS signing::signed and notarized"
 else
   echo "no" > "$OUT/signed.txt"
-  echo "::warning title=macOS signing::NOT signed/notarized - add the Apple secrets (MAC_CERT_APP_P12, MAC_CERT_INSTALLER_P12, MAC_CERT_PASSWORD, APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD) before selling"
+  echo "::warning title=macOS signing::NOT signed/notarized - add the Apple secrets (MAC_CERT_APP_P12, MAC_CERT_INSTALLER_P12, MAC_CERT_PASSWORD, APPLE_API_KEY_P8, APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, APPLE_TEAM_ID) before selling"
 fi
 ls -la "$OUT" "$OUT/manual"
