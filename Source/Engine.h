@@ -41,10 +41,25 @@ const char* lfoShapeName (int s);
 const juce::StringArray& syncNames();
 double syncBeats (int sync);   // 0 = free
 
-enum ArpMode { amOff = 0, amArp, amSeq };
+enum ArpMode { amOff = 0, amArp, amSeq, amArpSeq };   // ARP+SEQ: the arp picks the note, the step adds its transpose
 enum ArpDir { adUp = 0, adDown, adUpDown, adDownUp, adPlayed, adRandom, adChord, adConverge, numArpDirs };
 const char* arpDirName (int d);
 enum ArpEnd { aeLoop = 0, aeOneShot, aeHold };
+
+// tracker-style macro: one value per 1/60 s frame (x speed), loops from 'loop' or holds the last value
+struct Macro
+{
+    static constexpr int maxLen = 16;
+    int len = 0, loop = -1;
+    int v[maxLen] {};
+    int at (int frame) const
+    {
+        if (len <= 0) return 0;
+        if (frame < len) return v[frame];
+        if (loop >= 0 && loop < len) return v[loop + (frame - len) % (len - loop)];
+        return v[len - 1];
+    }
+};
 
 struct LayerParams
 {
@@ -69,6 +84,10 @@ struct LayerParams
     bool stepOn[maxSteps];
 
     FxParams fx[layerFxSlots];
+
+    // tracker macros: volume 0..15, arpeggio (semitones), wave index (-1 = keep), pitch (cents per frame); speed = frames per step
+    Macro mVol, mArp, mWave, mPitch;
+    int macroSpeed = 1;
 
     LayerParams()
     {
@@ -134,7 +153,8 @@ private:
     struct Voice
     {
         bool active = false, held = false, sustained = false, arpNote = false, kill = false;
-        float killGain = 1.0f, envSmooth = 0.0f;   // envSmooth: the chips' stepped volume, de-clicked
+        float killGain = 1.0f, envSmooth = 0.0f, macroCents = 0.0f;
+        int macroFrame = -1, macroArp = 0, macroVol = 15, baseWave = 0;   // envSmooth: the chips' stepped volume, de-clicked
         int note = -1;
         float velocity = 0.0f, pitch = 60.0f, target = 60.0f, vel = 1.0f, panOffset = 0.0f, random = 0.0f;
         double t = 0.0, gateLeft = -1.0;   // arp notes: samples until their note-off

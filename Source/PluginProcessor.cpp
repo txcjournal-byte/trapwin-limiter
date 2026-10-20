@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "Instruments.h"
 #include "BitEraData.h"
 #include <map>
 #if ! BE_HEADLESS
@@ -134,7 +135,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout BitEraProcessor::createLayou
         // arpeggiator / sequencer
         StringArray dirs, rates;
         for (int d = 0; d < bitera::numArpDirs; ++d) dirs.add (bitera::arpDirName (d));
-        group->addChild (std::make_unique<AudioParameterChoice> (id ("arp"), L + "Arp Mode", StringArray { "OFF", "ARP", "SEQ" }, 0));
+        group->addChild (std::make_unique<AudioParameterChoice> (id ("arp"), L + "Arp Mode", StringArray { "OFF", "ARP", "SEQ", "ARP + SEQ" }, 0));
         group->addChild (std::make_unique<AudioParameterChoice> (id ("arpdir"), L + "Arp Direction", dirs, 0));
         group->addChild (std::make_unique<AudioParameterChoice> (id ("arprate"), L + "Arp Rate", bitera::syncNames(), 7));
         group->addChild (std::make_unique<AudioParameterInt> (id ("arpoct"), L + "Arp Octaves", 1, 4, 1));
@@ -255,6 +256,7 @@ void BitEraProcessor::loadBank()
         for (size_t k = 0; k < s.data.size(); ++k)
             s.blockPeak[k / 16] = juce::jmax (s.blockPeak[k / 16], std::abs (s.data[k]));
     }
+    bitera::addInstruments (bank);   // the consoles' ROM instruments, after the 72 era sounds
     bitera::chips::registerBank (&bank);
 }
 
@@ -307,6 +309,7 @@ void BitEraProcessor::readParams (bitera::EngineParams& p, bool messageThread)
             o.stepVel[k] = st.vel[k]; o.stepGate[k] = st.gate[k]; o.stepPan[k] = st.pan[k];
             o.stepNote[k] = st.note[k]; o.stepWave[k] = st.wave[k]; o.stepOn[k] = st.on[k];
         }
+        o.mVol = st.mVol; o.mArp = st.mArp; o.mWave = st.mWave; o.mPitch = st.mPitch; o.macroSpeed = st.macroSpeed;
         for (int k = 0; k < bitera::layerFxSlots; ++k) fxRead (l.fx[k], o.fx[k]);
     }
     for (int k = 0; k < bitera::masterFxSlots; ++k) fxRead (mfx[k], p.masterFx[k]);
@@ -375,7 +378,7 @@ juce::ValueTree BitEraProcessor::stepsTree (int layer)
 float BitEraProcessor::getStep (int layer, const char* field, int step) const
 {
     const juce::String f (field);
-    const float def = (f == "vel" || f == "gate" || f == "on") ? 1.0f : (f == "wave" ? -1.0f : 0.0f);
+    const float def = (f == "vel" || f == "gate" || f == "on" || f == "mspeed") ? 1.0f : ((f == "wave" || f == "mw" || f.endsWith ("loop")) ? -1.0f : 0.0f);
     auto steps = state.state.getChildWithName ("steps").getChildWithName ("layer" + juce::String (layer + 1));
     return steps.isValid() ? (float) steps.getProperty (f + juce::String (step), def) : def;
 }
@@ -397,6 +400,21 @@ void BitEraProcessor::pushSteps()
             t.note[k] = juce::roundToInt (getStep (l, "note", k)); t.wave[k] = juce::roundToInt (getStep (l, "wave", k));
             t.on[k] = getStep (l, "on", k) > 0.5f;
         }
+    // tracker macros: fields m<v|a|w|p><step>, lengths m?len0, loop points m?loop0, speed mspeed0
+    for (int l = 0; l < bitera::numLayers; ++l)
+    {
+        auto& t = pendingSteps[l];
+        const char* keys[4] = { "mv", "ma", "mw", "mp" };
+        bitera::Macro* ms[4] = { &t.mVol, &t.mArp, &t.mWave, &t.mPitch };
+        for (int m = 0; m < 4; ++m)
+        {
+            const juce::String k (keys[m]);
+            ms[m]->len = juce::jlimit (0, bitera::Macro::maxLen, juce::roundToInt (getStep (l, (k + "len").toRawUTF8(), 0)));
+            ms[m]->loop = juce::roundToInt (getStep (l, (k + "loop").toRawUTF8(), 0));
+            for (int i = 0; i < bitera::Macro::maxLen; ++i) ms[m]->v[i] = juce::roundToInt (getStep (l, k.toRawUTF8(), i));
+        }
+        t.macroSpeed = juce::jmax (1, juce::roundToInt (getStep (l, "mspeed", 0)));
+    }
     ++stepsVersion;
 }
 
@@ -538,13 +556,25 @@ void BitEraProcessor::levelPreset()
     const double hold = juce::jlimit (0.3, 0.8, getSoundLengthSeconds (getPreset()));
     juce::AudioBuffer<float> buf;
     const int n = renderNote (p, previewNote (getPreset()), hold, 0.1, buf, 22050.0);
+    // loudness as the ear hears it: highs (2 kHz and up) count more, so bright sounds are not set louder than dull ones
     float peak = 0.0f; double sum = 0.0;
+    const float k = 1.0f - std::exp (-6.2831853f * 1500.0f / 22050.0f);
     for (int c = 0; c < 2; ++c)
-        for (int i = 0; i < n; ++i) { const float v = buf.getSample (c, i); peak = juce::jmax (peak, std::abs (v)); sum += (double) v * v; }
+    {
+        float lpState = 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            const float v = buf.getSample (c, i);
+            peak = juce::jmax (peak, std::abs (v));
+            lpState += (v - lpState) * k;
+            const float w = v + 0.9f * (v - lpState);
+            sum += (double) w * w;
+        }
+    }
     const float rms = (float) std::sqrt (sum / juce::jmax (1, 2 * n));
     if (peak < 1.0e-5f) return;
     // targets (before the -6 dB default volume): peak -1 dBFS, loudness -15 dBFS RMS - whichever is reached first
-    const float g = juce::jmin (0.89f / peak, 0.178f / juce::jmax (rms, 1.0e-6f));
+    const float g = juce::jmin (0.89f / peak, 0.16f / juce::jmax (rms, 1.0e-6f));
     setParam ("trim", juce::jlimit (-24.0f, 24.0f, juce::Decibels::gainToDecibels (g)));
 }
 

@@ -536,6 +536,9 @@ private:
         menu.setLookAndFeel (&knobLnf);
         if (chips::isSampler (src))
         {
+            // the consoles' ROM instruments first, then the era sounds
+            for (int w = numSounds; w < n; ++w) menu.addItem (w + 1, chips::waveName (src, w), true, w == waveIndex());
+            menu.addSeparator();
             for (int ei = 0; ei < numEras; ++ei)
             {
                 PopupMenu sub;
@@ -1021,7 +1024,8 @@ public:
         paintKnob (g, gate, paramText (gate.id)); paintKnob (g, swing, paramText (swing.id));
         paintPanel (g, grid);
 
-        const bool seq = roundToInt (value (BitEraProcessor::layerId (layer, "arp"))) == amSeq;
+        const int amode = roundToInt (value (BitEraProcessor::layerId (layer, "arp")));
+        const bool seq = amode == amSeq || amode == amArpSeq;
         const bool off = roundToInt (value (BitEraProcessor::layerId (layer, "arp"))) == amOff;
         const int n = roundToInt (value (BitEraProcessor::layerId (layer, "arpsteps")));
         const int cur = proc.currentStep (layer);
@@ -1069,7 +1073,8 @@ public:
         }
         g.setColour (ink().withAlpha (0.7f));
         g.setFont (fonts.body (e, 10.5f));
-        g.drawText (seq ? "SEQ: every held key plays the step pattern, NOTE = semitones from the key"
+        g.drawText (amode == amArpSeq ? "ARP + SEQ: the arp plays the held keys, each step adds its NOTE transpose on top"
+                    : seq ? "SEQ: every held key plays the step pattern, NOTE = semitones from the key"
                         : "ARP: held keys in the chosen direction. Drag in the lanes to draw. WAVE: click to cycle the layer's waves (- = layer wave)",
                     grid.reduced (10, 4).withTop (grid.getBottom() - 20), Justification::centredLeft);
     }
@@ -2103,6 +2108,10 @@ private:
             if (e == 9) g.setColour (t.muted);
             g.drawText (E.line, lineR, Justification::centredLeft);
         }
+        // the game platform this era plays
+        g.setFont (fonts.body (e, 11.5f));
+        g.setColour ((e == 6 || e == 4 || e == 11) ? Colours::white.withAlpha (0.75f) : t.ink.withAlpha (0.7f));
+        g.drawText (String ("SOUND: ") + platformName (e), lineR.translated (0, 19).withHeight (14).withWidth (480), Justification::centredLeft);
     }
 
     void paintRows (Graphics& g, int e, const Theme& t)

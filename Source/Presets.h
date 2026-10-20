@@ -11,11 +11,12 @@ namespace bitera
 constexpr int presetsPerEra = 600;
 constexpr int numPresets = numEras * presetsPerEra;
 
-enum Category { cBass = 0, cLead, cPad, cKeys, cPluck, cBells, cBrass, cStrings, cOrgan, cWinds, cVoice, cDrums, cPerc, cFx, cArp, cSeq, numCategories };
+enum Category { cBass = 0, cLead, cPad, cKeys, cPluck, cBells, cBrass, cStrings, cOrgan, cWinds, cWaves, cDrums, cPerc, cFx, cArp, cSeq, numCategories };
 enum PresetType { ptShot = 0, ptSustain, ptPhrase, ptLoop, numPresetTypes };   // shot = plays out by itself, sustain = holds while the key is down
 
 const char* categoryName (int c);
 const char* presetTypeName (int t);
+const char* platformName (int eraIndex);   // the game platform(s) an era plays
 
 struct PresetInfo
 {

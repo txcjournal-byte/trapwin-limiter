@@ -151,3 +151,40 @@ jobs:
             gh release create bitera-test --prerelease --title "BIT ERA - latest test build" --notes "Bit Era - latest test build" --target "$GITHUB_SHA" || true
           fi
           gh release upload bitera-test out/BIT-ERA-Setup-Mac.pkg out/BIT-ERA-VST3-Mac.zip out/BIT-ERA-AU-Mac.zip --clobber
+
+  # The whole factory bank as WAV files (per era zip, era / category folders) on the test release.
+  # Runs on a manual start or when the commit message contains [wav].
+  wav-bank:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[wav]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Linux build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libfreetype6-dev libfontconfig1-dev libasound2-dev zip > /dev/null
+      - name: Build the render tool
+        run: |
+          cmake -S . -B build-wav -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-wav --parallel 4 --target BitEraRenderDemo
+      - name: Render 7,200 presets and publish one zip per era
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TOOL=build-wav/BitEraRenderDemo_artefacts/Release/BitEraRenderDemo
+          if ! gh release view bitera-test > /dev/null 2>&1; then
+            gh release create bitera-test --prerelease --title "BIT ERA - latest test build" --notes "Bit Era - latest test build" --target "$GITHUB_SHA" || true
+          fi
+          for e in $(seq 0 11); do
+            rm -rf wav && mkdir wav
+            $TOOL wav --all $e $e > /dev/null
+            dir=$(ls wav)
+            name="BIT-ERA-WAV-$(echo "$dir" | cut -d' ' -f1-2 | tr ' ' '-').zip"
+            (cd wav && zip -q -r "../$name" .)
+            echo "$name $(du -h "$name" | cut -f1) $(find wav -name '*.wav' | wc -l) files"
+            gh release upload bitera-test "$name" --clobber
+            rm -f "$name"
+          done

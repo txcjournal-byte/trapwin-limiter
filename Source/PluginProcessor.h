@@ -111,6 +111,8 @@ private:
         float vel[bitera::maxSteps], gate[bitera::maxSteps], pan[bitera::maxSteps];
         int note[bitera::maxSteps], wave[bitera::maxSteps];
         bool on[bitera::maxSteps];
+        bitera::Macro mVol, mArp, mWave, mPitch;
+        int macroSpeed = 1;
     };
     StepTable pendingSteps[bitera::numLayers] {}, audioSteps[bitera::numLayers] {};
     juce::SpinLock stepLock;

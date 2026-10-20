@@ -23,6 +23,13 @@ enum Source
     handheldPcm,     // 32-bit handheld PCM: 8-bit at 13-18 kHz, no filter
     console64,       // 64-bit console: 22 kHz, soft low-pass
     rompler90s,      // 90s PC sound card / ROMpler: 22 kHz 16-bit, linear interpolation
+    vrc6,            // 8-bit console expansion: 8-step duty pulses + the 7-step accumulator saw
+    opll,            // 8-bit console expansion FM: 2-operator OPLL with its built-in instruments
+    diskWave,        // console disk system: 64-step 6-bit wavetable with a modulation unit
+    scc,             // home computer wavetable cartridge: 32-step 8-bit waves
+    pokey,           // 8-bit computer POKEY: in-tune dividers, poly distortions, high-pass pairs
+    ttl,             // first arcades: discrete TTL counters, LFSR noise, 555 siren
+    softSynth,       // early software synth: 8-bit single-cycle waves
     numSources
 };
 
@@ -42,6 +49,7 @@ struct Sample
     double sampleRate = 44100.0;
     int root = 60;
     juce::String name;
+    int loopStart = -1, loopEnd = -1;   // sustained samples loop while the key is held
 };
 using Bank = std::vector<Sample>;
 void registerBank (const Bank* bank);   // the processor's bank (for wave names / counts of the sampler sources)
@@ -54,11 +62,14 @@ public:
     // freq in Hz of the note (for samplers: freq / root freq is the playback ratio). charAmt 0..1 = per chip colour.
     float next (double freq, float charAmt);
     bool finished() const { return done; }   // sample sources: reached the end
+    void setWave (int wave) { if (! isSampler (src)) wv = juce::jlimit (0, juce::jmax (0, numWaves (src) - 1), wave); }
 
 private:
     float pulseBlep (double inc, double width);
     float fmNext (double freq, float charAmt);
     float oplNext (double freq, float charAmt);
+    float oplCore (const void* patch, double freq, float charAmt);
+    float postFilter (float x);
     float samplerNext (double freq, float charAmt);
     float noiseNes (double freq, bool shortMode, bool authentic);
     float noiseLfsr15 (double rateHz, bool sevenBit);
@@ -72,6 +83,8 @@ private:
     bool done = false;
 
     double cacheF = -1.0, cacheA = 0.0, cacheB = 0.0;   // per-frequency cached values
+    float pfLp = 0.0f, pfHp = 0.0f, pfHp2 = 0.0f;       // the console's output filter
+    double ph4 = 0.0;
     // FM state
     float opDec[4] {}, opDecK[4] {};
     double opPh[4] {};

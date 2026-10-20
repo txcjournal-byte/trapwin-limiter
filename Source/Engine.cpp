@@ -224,6 +224,7 @@ void Engine::startVoice (int li, Voice& v, int note, float vel, float fromPitch,
     const int wave = (stepIdx >= 0 && lp.stepWave[stepIdx] >= 0) ? lp.stepWave[stepIdx] : lp.wave;
     v.panOffset = stepIdx >= 0 ? lp.stepPan[stepIdx] : 0.0f;
     v.osc.start (lp.source, wave, sr, bank);
+    v.baseWave = wave; v.macroFrame = -1; v.macroCents = 0.0f; v.macroArp = 0; v.macroVol = 15;
     v.amp = {}; v.flt = {};
     v.amp.gate (true); v.flt.gate (true);
     for (auto& e : v.menv) { e = {}; e.gate (true); }
@@ -369,6 +370,8 @@ void Engine::arpStep (int li, const EngineParams& p)
             }
             if (! seq.empty()) notes.push_back (seq[(size_t) (L.arpIndex++ % (int) seq.size())]);
         }
+        if (lp.arpMode == amArpSeq)   // both at once: the step's transpose on top of the arpeggio
+            for (auto& n : notes) n.first += lp.stepNote[next];
     }
 
     for (auto& n : notes)
@@ -494,6 +497,7 @@ void Engine::renderVoices (int li, int start, int num, const EngineParams& p)
             float fc = lp.cutoff;
             const float killK = (float) std::exp (-1.0 / (0.003 * sr));
             const float smoothK = (float) (1.0 - std::exp (-1.0 / (0.0012 * sr)));
+            const bool hasMacros = lp.mVol.len > 0 || lp.mArp.len > 0 || lp.mWave.len > 0 || lp.mPitch.len > 0;
             double semis = 60.0, freq = 440.0;
             for (int i = c0; i < c0 + cn; ++i)
             {
@@ -501,8 +505,20 @@ void Engine::renderVoices (int li, int start, int num, const EngineParams& p)
                 if (((i - c0) & 3) == 0)   // pitch at 1/4 of the sample rate (smooth enough, much cheaper)
                 {
                     const double t = v.t;
+                    if (hasMacros)
+                    {
+                        const int frame = (int) (t * 60.0 / juce::jmax (1, lp.macroSpeed));
+                        while (v.macroFrame < frame)
+                        {
+                            ++v.macroFrame;
+                            if (lp.mPitch.len > 0) v.macroCents += (float) lp.mPitch.at (v.macroFrame);
+                        }
+                        v.macroArp = lp.mArp.at (frame);
+                        v.macroVol = lp.mVol.len > 0 ? juce::jlimit (0, 15, lp.mVol.at (frame)) : 15;
+                        if (lp.mWave.len > 0) { const int w = lp.mWave.at (frame); if (w >= 0) v.osc.setWave (w); }
+                    }
                     const float vibFade = (float) juce::jmin (1.0, t / 0.35);
-                    semis = v.pitch + lp.coarse + lp.fine * 0.01f + bend * p.bendRange + pitchMod
+                    semis = v.pitch + lp.coarse + lp.fine * 0.01f + bend * p.bendRange + pitchMod + v.macroArp + v.macroCents * 0.01f
                           + (lp.pitchEnv != 0.0f ? lp.pitchEnv * std::exp (-t / juce::jmax (0.001f, lp.pitchDecay)) : 0.0)
                           + (vib > 0.0f ? vib * 0.01f * vibFade * std::sin (twoPi * lp.vibRate * t) : 0.0);
                     freq = mtof (semis);
@@ -516,7 +532,8 @@ void Engine::renderVoices (int li, int start, int num, const EngineParams& p)
                     x = v.filter.process (x, lp.filter, fc, reso, sr);
                 }
                 float env = stepVolume (v.amp.next (lp.a, lp.d, lp.s, lp.r, sr), steps, logSteps);
-                if (steps > 0) { v.envSmooth += (env - v.envSmooth) * smoothK; env = v.envSmooth; }   // keep the steps, lose the clicks
+                if (hasMacros && lp.mVol.len > 0) env *= (float) v.macroVol / 15.0f;
+                if (steps > 0 || hasMacros) { v.envSmooth += (env - v.envSmooth) * smoothK; env = v.envSmooth; }   // keep the steps, lose the clicks
                 if (v.kill) { v.killGain *= killK; env *= v.killGain; if (v.killGain < 1.0e-3f) { v.active = false; break; } }
                 const float y = x * env * level;
                 outL[i] += y * panL;

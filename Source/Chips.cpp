@@ -119,6 +119,77 @@ struct PolyPatterns
 };
 const PolyPatterns& polyPatterns() { static PolyPatterns pp; return pp; }
 
+
+// ---- 8-bit console expansion FM (OPLL style built-in instruments) ------------------------------
+const OplPatch opllPatches[] = {
+    { 1, 1.4f, 1, 0, 0, 0.5f, 1.0f, 0.7f },   // Violin
+    { 3, 1.6f, 1, 0, 1, 0.3f, 6.0f, 0.2f },   // Guitar
+    { 1, 1.2f, 1, 0, 0, 0.2f, 4.0f, 0.1f },   // Piano
+    { 1, 0.5f, 1, 0, 0, 0.0f, 0.5f, 0.8f },   // Flute
+    { 2, 1.3f, 1, 0, 1, 0.4f, 0.6f, 0.8f },   // Clarinet
+    { 1, 1.7f, 2, 0, 0, 0.3f, 0.8f, 0.7f },   // Oboe
+    { 1, 1.8f, 1, 0, 0, 0.6f, 1.2f, 0.6f },   // Trumpet
+    { 3, 0.9f, 1, 1, 0, 0.4f, 0.0f, 1.0f },   // Organ
+    { 1, 1.1f, 1, 0, 0, 0.2f, 0.8f, 0.6f },   // Horn
+    { 1, 2.0f, 1, 0, 1, 0.8f, 1.5f, 0.5f },   // Synth
+    { 5, 1.9f, 1, 0, 1, 0.1f, 5.0f, 0.1f },   // Harpsichord
+    { 4, 1.0f, 1, 0, 0, 0.0f, 3.0f, 0.0f },   // Vibraphone
+    { 1, 2.2f, 1, 0, 1, 0.5f, 7.0f, 0.2f },   // Synth Bass
+    { 1, 1.4f, 1, 0, 0, 0.2f, 5.0f, 0.2f },   // Acoustic Bass
+    { 2, 2.0f, 1, 0, 1, 0.7f, 2.0f, 0.4f },   // E.Guitar
+};
+const char* opllNames[] = { "Violin", "Guitar", "Piano", "Flute", "Clarinet", "Oboe", "Trumpet", "Organ", "Horn", "Synth", "Harpsichord",
+                            "Vibraphone", "Synth Bass", "Acoustic Bass", "E.Guitar" };
+const char* vrc6Names[] = { "Pulse 6%", "Pulse 12%", "Pulse 19%", "Pulse 25%", "Pulse 31%", "Pulse 38%", "Pulse 44%", "Pulse 50%", "Saw", "Saw Soft" };
+const char* diskNames[] = { "Sine", "Saw", "Square", "Organ", "Bell", "Harsh", "Flute", "Brass" };
+const char* sccNames[] = { "Saw", "Square", "Organ", "Sine", "Brass", "Strings", "Voice", "Bass" };
+const char* pokeyNames[] = { "Pure Tone", "16-bit Pure", "Poly4 Buzz", "Poly5 Square", "Poly17 Noise", "Poly5 + Poly4", "High-pass Pair", "Clean Bass" };
+const char* ttlNames[] = { "Square", "Narrow Pulse", "Noise", "Rumble", "555 Siren" };
+const char* softNames[] = { "Sine", "Triangle", "Saw", "Square", "Organ", "Brass", "Strings", "Hollow" };
+
+// 64-step 6-bit tables (disk system), 32-step 8-bit tables (wavetable cartridge), 256-step 8-bit (soft synth)
+struct WaveSets
+{
+    float disk[8][64] {}, sccw[8][32] {}, soft[8][256] {};
+    WaveSets()
+    {
+        auto shape = [] (int w, double x)
+        {
+            switch (w)
+            {
+                case 0: return std::sin (x);
+                case 1: return 1.0 - 2.0 * std::fmod (x / twoPi, 1.0);
+                case 2: return std::sin (x) >= 0 ? 0.8 : -0.8;
+                case 3: return (std::sin (x) + 0.5 * std::sin (2 * x) + 0.4 * std::sin (3 * x) + 0.25 * std::sin (4 * x)) / 1.6;
+                case 4: return (std::sin (x) + 0.6 * std::sin (5 * x) + 0.3 * std::sin (9 * x)) / 1.4;
+                case 5: return std::tanh (3.0 * std::sin (x) + 1.5 * std::sin (2 * x));
+                case 6: return (std::sin (x) + 0.2 * std::sin (2 * x) + 0.08 * std::sin (3 * x)) / 1.1;
+                default: { double v = 0; for (int h = 1; h <= 8; ++h) v += std::sin (h * x) / h * (h % 2 ? 1.0 : 0.6); return v / 1.6; }
+            }
+        };
+        for (int w = 0; w < 8; ++w)
+        {
+            for (int i = 0; i < 64; ++i) disk[w][i] = (float) (std::round ((shape (w, twoPi * i / 64.0) * 0.5 + 0.5) * 63.0) / 63.0 * 2.0 - 1.0);
+            const int sccMap[8] = { 1, 2, 3, 0, 7, 1, 6, 5 };
+            for (int i = 0; i < 32; ++i)
+            {
+                double v = shape (sccMap[w], twoPi * i / 32.0);
+                if (w == 5) v = (shape (1, twoPi * i / 32.0) + shape (1, twoPi * i / 32.0 * 1.0 + 0.3)) * 0.5;   // strings: two saws
+                sccw[w][i] = (float) (std::round (v * 127.0) / 127.0);
+            }
+            const int softMap[8] = { 0, 9, 1, 2, 3, 7, 1, 6 };
+            for (int i = 0; i < 256; ++i)
+            {
+                const double x = twoPi * i / 256.0;
+                double v = softMap[w] == 9 ? (i < 128 ? i / 64.0 - 1.0 : 3.0 - i / 64.0) : shape (softMap[w], x);
+                if (w == 6) v = 0.6 * shape (1, x) + 0.4 * shape (1, x * 2.0);
+                soft[w][i] = (float) (std::round (v * 127.0) / 127.0);
+            }
+        }
+    }
+};
+const WaveSets& waveSets() { static WaveSets w; return w; }
+
 float mtof (double m) { return (float) (440.0 * std::pow (2.0, (m - 69.0) / 12.0)); }
 } // namespace
 
@@ -127,17 +198,18 @@ const char* sourceName (int s)
 {
     static const char* n[] = { "ERA SAMPLES", "8-BIT CONSOLE", "4-BIT HANDHELD", "HOME COMPUTER SID", "16-BIT FM", "PC FM CARD",
                                "PSG SQUARE CHIP", "POLY COUNTER", "8-BIT SAMPLER", "16-BIT SAMPLER", "32-BIT SAMPLER",
-                               "HANDHELD PCM", "64-BIT CONSOLE", "90s ROMPLER" };
+                               "HANDHELD PCM", "64-BIT CONSOLE", "90s ROMPLER", "8-BIT EXPANSION", "8-BIT EXPANSION FM",
+                               "DISK WAVETABLE", "WAVETABLE CART", "POKEY COMPUTER", "TTL ARCADE", "SOFT SYNTH" };
     return n[juce::jlimit (0, numSources - 1, s)];
 }
 
 const char* sourceShort (int s)
 {
-    static const char* n[] = { "SAMPLE", "8-BIT", "4-BIT", "SID", "FM16", "PC FM", "PSG", "POLY", "S8", "S16", "S32", "PCM", "64", "ROM" };
+    static const char* n[] = { "SAMPLE", "8-BIT", "4-BIT", "SID", "FM16", "PC FM", "PSG", "POLY", "S8", "S16", "S32", "PCM", "64", "ROM", "EXP", "EXP FM", "DISK", "SCC", "POKEY", "TTL", "SOFT" };
     return n[juce::jlimit (0, numSources - 1, s)];
 }
 
-bool isSampler (int s) { return s == eraSample || s >= sampler8; }
+bool isSampler (int s) { return s == eraSample || (s >= sampler8 && s <= rompler90s); }
 
 static int bankSize = 0;   // set by the processor when the bank is loaded (for names / counts)
 static const Bank* globalBank = nullptr;
@@ -153,6 +225,10 @@ int numWaves (int s)
         case pcFm: return numOpl;
         case psg: return 8;
         case polyCounter: return 7;
+        case vrc6: return 10;
+        case opll: return 15;
+        case diskWave: case scc: case softSynth: case pokey: return 8;
+        case ttl: return 5;
         default: return globalBank != nullptr ? (int) globalBank->size() : juce::jmax (1, bankSize);
     }
 }
@@ -169,11 +245,18 @@ juce::String waveName (int s, int w)
         case pcFm: return oplNames[w];
         case psg: return psgNames[w];
         case polyCounter: return polyNames[w];
+        case vrc6: return vrc6Names[w];
+        case opll: return opllNames[w];
+        case diskWave: return diskNames[w];
+        case scc: return sccNames[w];
+        case pokey: return pokeyNames[w];
+        case ttl: return ttlNames[w];
+        case softSynth: return softNames[w];
         default: return globalBank != nullptr && w < (int) globalBank->size() ? (*globalBank)[(size_t) w].name : juce::String (w + 1);
     }
 }
 
-int volumeSteps (int s) { return (s == console8 || s == handheld4 || s == psg || s == polyCounter) ? 15 : 0; }
+int volumeSteps (int s) { return (s == console8 || s == handheld4 || s == psg || s == polyCounter || s == vrc6 || s == scc || s == pokey) ? 15 : 0; }
 bool volumeLog (int s) { return s == psg; }
 
 void registerBank (const Bank* b) { globalBank = b; bankSize = b != nullptr ? (int) b->size() : 0; }
@@ -190,6 +273,7 @@ void Osc::start (int source, int wave, double hostRate, const Bank* bank)
     for (auto& o : opOut) o = 0.0f;
     for (int i = 0; i < 4; ++i) { opDec[i] = 1.0f; opDecK[i] = 0.0f; }
     cacheF = -1.0; cacheA = cacheB = 0.0;
+    pfLp = pfHp = pfHp2 = 0.0f; ph4 = 0.0;
     fb[0] = fb[1] = 0.0f;
     if (src == computerSid) lfsr = 0x7ffff8;
     if (isSampler (src) && (bk == nullptr || bk->empty())) done = true;
@@ -421,23 +505,154 @@ float Osc::next (double freq, float c)
             }
             break;
         }
-        case polyCounter:
+        case polyCounter:   // TIA-style poly counters: the 5-bit dividers' mistuning, blended in by the character
         {
             const auto& pat = polyPatterns().p[juce::jlimit (0, 6, wv)];
             const double L = (double) pat.size();
-            const bool tia = c < 0.2f;   // low character: the authentic 5-bit dividers (out of tune); else 16-bit dividers (in tune)
-            const double base = tia ? 31400.0 : 1789773.0, maxN = tia ? 31.0 : 65535.0;
-            double stepsPerCycle = wv == 0 ? 2.0 : L;
-            const double n = juce::jlimit (0.0, maxN, std::round (base / (freq * stepsPerCycle)) - 1.0);
-            clockAcc += (base / (n + 1.0)) / sr;
+            const double stepsPerCycle = wv == 0 ? 2.0 : L;
+            if (freq != cacheF)
+            {
+                cacheF = freq;
+                const double n = juce::jlimit (0.0, 31.0, std::round (31400.0 / (freq * stepsPerCycle)) - 1.0);
+                const double tia = 31400.0 / ((n + 1.0) * stepsPerCycle);
+                const double wonk = juce::jlimit (-0.5, 0.5, std::log2 (tia / freq));   // at most half an octave off
+                cacheA = freq * std::pow (2.0, wonk * juce::jlimit (0.0, 1.0, (double) (c - 0.2f) * 1.25));
+            }
+            clockAcc += cacheA * stepsPerCycle / sr;
             while (clockAcc >= 1.0) { clockAcc -= 1.0; step = (step + 1) % (int) L; }
             out = pat[(size_t) step] ? 0.45f : -0.45f;
             lp += (out - lp) * 0.004f; out -= lp;
             break;
         }
+        case vrc6:
+        {
+            if (wv < 8)
+            {
+                const double praw = std::round (1789773.0 / (16.0 * freq)) - 1.0;
+                const double fq = praw > 4095.0 ? freq : 1789773.0 / (16.0 * (juce::jmax (1.0, praw) + 1.0));
+                out = pulseBlep (fq / sr, (wv + 1) / 16.0) * 0.5f;
+            }
+            else
+            {
+                // the accumulator saw: 7 steps per cycle, the rate sets loudness and grit
+                const double praw = std::round (1789773.0 / (14.0 * freq)) - 1.0;
+                const double fq = praw > 4095.0 ? freq : 1789773.0 / (14.0 * (juce::jmax (1.0, praw) + 1.0));
+                ph = wrap (ph + fq / sr);
+                const int rate = wv == 8 ? 42 : 24 + (int) (c * 12.0f);
+                const int k = (int) (ph * 7.0);
+                out = (float) ((((k * rate) >> 3) & 31) / 15.5 - 1.0) * 0.5f;
+            }
+            break;
+        }
+        case opll: out = oplNext (freq, c); break;
+        case diskWave:
+        {
+            // modulation unit: a slow table wobble on the pitch (character = depth)
+            ph2 = wrap (ph2 + 5.0 / sr);
+            const double mod = std::sin (twoPi * ph2) * c * 0.012;
+            ph = wrap (ph + freq * (1.0 + mod) / sr);
+            out = waveSets().disk[juce::jlimit (0, 7, wv)][(int) (ph * 64.0) & 63] * 0.5f;
+            break;
+        }
+        case scc:
+        {
+            const double praw = std::round (3579545.0 / (32.0 * freq)) - 1.0;
+            const double fq = praw > 4095.0 ? freq : 3579545.0 / (32.0 * (juce::jmax (8.0, praw) + 1.0));
+            ph = wrap (ph + fq / sr);
+            out = waveSets().sccw[juce::jlimit (0, 7, wv)][(int) (ph * 32.0) & 31] * 0.5f;
+            break;
+        }
+        case pokey:
+        {
+            const auto& pp = polyPatterns();
+            switch (wv)
+            {
+                case 0: case 1: case 7:
+                {
+                    // 8-bit dividers (slightly off) or 16-bit (in tune); clean bass = 16-bit with a soft edge
+                    double fq = freq;
+                    if (wv == 0) { const double n = juce::jlimit (0.0, 255.0, std::round (63921.0 / (2.0 * freq)) - 1.0); fq = freq < 125.0 ? freq : 63921.0 / (2.0 * (n + 1.0)); }
+                    out = pulseBlep (fq / sr, 0.5) * 0.5f;
+                    if (wv == 7) { lp2 += (out - lp2) * 0.15f; out = lp2; }
+                    break;
+                }
+                case 6:   // two squares a hair apart, XOR = the high-pass "filter" sound
+                {
+                    ph2 = wrap (ph2 + freq * (1.0 + 0.004 + c * 0.01) / sr);
+                    ph = wrap (ph + freq / sr);
+                    out = ((ph < 0.5) != (ph2 < 0.5)) ? 0.45f : -0.45f;
+                    break;
+                }
+                default:
+                {
+                    const auto& pat = wv == 2 ? pp.p[2] : wv == 3 ? pp.p[5] : wv == 4 ? pp.p[4] : pp.p[6];
+                    const double L = (double) pat.size();
+                    clockAcc += freq * (wv == 4 ? 64.0 : L) / sr;
+                    while (clockAcc >= 1.0) { clockAcc -= 1.0; step = (step + 1) % (int) L; }
+                    out = pat[(size_t) step] ? 0.42f : -0.42f;
+                    break;
+                }
+            }
+            lp += (out - lp) * 0.003f; out -= lp;
+            break;
+        }
+        case ttl:
+        {
+            switch (wv)
+            {
+                case 0: out = pulseBlep (freq / sr, 0.5) * 0.5f; break;
+                case 1: out = pulseBlep (freq / sr, 0.1) * 0.5f; break;
+                case 4:   // 555 siren: the pitch swept by a slow triangle
+                {
+                    ph2 = wrap (ph2 + (2.0 + c * 6.0) / sr);
+                    const double sweep = 1.0 + 0.35 * (1.0 - 4.0 * std::abs (ph2 - 0.5));
+                    out = pulseBlep (freq * sweep / sr, 0.5) * 0.5f;
+                    break;
+                }
+                default:  // noise / rumble: a 17-bit LFSR clocked by the key
+                {
+                    clockAcc += freq * (wv == 2 ? 48.0 : 6.0) / sr;
+                    while (clockAcc >= 1.0) { clockAcc -= 1.0; const juce::uint32 b = (lfsr ^ (lfsr >> 5)) & 1u; lfsr = (lfsr >> 1) | (b << 16); }
+                    out = (lfsr & 1u) ? 0.4f : -0.4f;
+                    break;
+                }
+            }
+            break;
+        }
+        case softSynth:
+        {
+            ph = wrap (ph + freq / sr);
+            const auto& tb = waveSets().soft[juce::jlimit (0, 7, wv)];
+            const double x = ph * 256.0; const int i0 = (int) x; const float f = (float) (x - i0);
+            out = (tb[i0 & 255] + (tb[(i0 + 1) & 255] - tb[i0 & 255]) * f) * 0.5f;
+            out = std::round (out * 127.0f) / 127.0f;   // 8-bit output
+            break;
+        }
         default: out = samplerNext (freq, c); break;
     }
-    return out;
+    return postFilter (out);
+}
+
+// the analog output stage of each console (what made them sound like themselves, and not harsh)
+float Osc::postFilter (float x)
+{
+    float lpHz = 0.0f, hpHz = 0.0f;
+    switch (src)
+    {
+        case console8: case vrc6: lpHz = 14000.0f; hpHz = 90.0f; break;   // 8-bit console: RC low-pass + high-pass
+        case handheld4: lpHz = 12000.0f; break;
+        case psg: case scc: lpHz = 11000.0f; break;
+        case fm16: lpHz = 8500.0f; break;                                   // the 16-bit console's darker output
+        case opll: case pcFm: lpHz = 11000.0f; break;
+        case pokey: case polyCounter: lpHz = 9000.0f; break;
+        case ttl: lpHz = 7000.0f; break;
+        case diskWave: lpHz = 3000.0f; break;                               // the disk system's strong low-pass
+        case computerSid: lpHz = 12000.0f; break;
+        default: return x;
+    }
+    if (lpHz > 0.0f) { const float k = 1.0f - std::exp (-6.2831853f * lpHz / (float) sr); pfLp += (x - pfLp) * k; x = pfLp; }
+    if (hpHz > 0.0f) { const float k = 1.0f - std::exp (-6.2831853f * hpHz / (float) sr); pfHp += (x - pfHp) * k; x -= pfHp; }
+    return x;
 }
 
 float Osc::fmNext (double freq, float c)
@@ -478,7 +693,13 @@ float Osc::fmNext (double freq, float c)
 
 float Osc::oplNext (double freq, float c)
 {
-    const auto& p = oplPatches[juce::jlimit (0, numOpl - 1, wv)];
+    if (src == opll) return oplCore (&opllPatches[juce::jlimit (0, 14, wv)], freq, c);
+    return oplCore (&oplPatches[juce::jlimit (0, numOpl - 1, wv)], freq, c);
+}
+
+float Osc::oplCore (const void* patch, double freq, float c)
+{
+    const auto& p = *static_cast<const OplPatch*> (patch);
     // 10-bit F-number + block quantization
     if (freq != cacheF)
     {
@@ -512,11 +733,21 @@ float Osc::samplerNext (double freq, float c)
     const double len = (double) d.size();
     const double ratio = freq / mtof (s.root);
     auto at = [&] (double i) -> float { const auto k = (size_t) juce::jlimit (0.0, len - 1.0, i); return d[k]; };
+    // sustained samples: jump back by one loop when the play position passes the loop end (units = pos units per source sample)
+    auto loopWrap = [&] (double& p, double unitsPerSample)
+    {
+        if (s.loopEnd > s.loopStart && s.loopStart >= 0)
+        {
+            const double end = s.loopEnd * unitsPerSample, span = (s.loopEnd - s.loopStart) * unitsPerSample;
+            while (p >= end) p -= span;
+        }
+    };
 
     switch (src)
     {
         case eraSample:
         {
+            loopWrap (pos, 1.0);
             if (pos >= len - 1.0) { done = true; return 0.0f; }
             const auto i = (size_t) pos; const float f = (float) (pos - (double) i);
             const float y = d[i] + (d[juce::jmin (i + 1, d.size() - 1)] - d[i]) * f;
@@ -532,6 +763,7 @@ float Osc::samplerNext (double freq, float c)
             {
                 tickAcc -= 1.0;
                 pos += s.sampleRate / base;
+                loopWrap (pos, 1.0);
                 hold = std::round (at (pos) * 127.0f) / 127.0f;
             }
             if (pos >= len) { done = true; return 0.0f; }
@@ -548,6 +780,7 @@ float Osc::samplerNext (double freq, float c)
             {
                 tickAcc -= 1.0;
                 pos += ratio * grid / outRate;   // pos in grid samples
+                loopWrap (pos, grid / s.sampleRate);
                 const double gi = std::floor (pos); const float f = (float) (pos - gi);
                 auto g = [&] (double k)
                 {
@@ -569,6 +802,7 @@ float Osc::samplerNext (double freq, float c)
         {
             constexpr double grid = 22050.0;
             pos += ratio * grid / sr;
+            loopWrap (pos, grid / s.sampleRate);
             if (pos * s.sampleRate / grid >= len) { done = true; return 0.0f; }
             const double gi = std::floor (pos); const float f = (float) (pos - gi);
             auto g = [&] (double k)
@@ -590,6 +824,7 @@ float Osc::samplerNext (double freq, float c)
             {
                 tickAcc -= 1.0;
                 pos += ratio;
+                loopWrap (pos, grid / s.sampleRate);
                 hold = std::round (at (pos * s.sampleRate / grid) * 127.0f) / 127.0f;
             }
             if (pos * s.sampleRate / grid >= len) { done = true; return 0.0f; }
@@ -599,6 +834,7 @@ float Osc::samplerNext (double freq, float c)
         {
             constexpr double grid = 22050.0;
             pos += ratio * grid / sr;
+            loopWrap (pos, grid / s.sampleRate);
             if (pos * s.sampleRate / grid >= len) { done = true; return 0.0f; }
             const double gi = std::floor (pos); const float f = (float) (pos - gi);
             const float y = at (gi * s.sampleRate / grid) * (1 - f) + at ((gi + 1) * s.sampleRate / grid) * f;
@@ -610,6 +846,7 @@ float Osc::samplerNext (double freq, float c)
         {
             const double grid = 11025.0 + (44100.0 - 11025.0) * c;
             pos += ratio * grid / sr;
+            loopWrap (pos, grid / s.sampleRate);
             if (pos * s.sampleRate / grid >= len) { done = true; return 0.0f; }
             const double gi = std::floor (pos); const float f = (float) (pos - gi);
             return at (gi * s.sampleRate / grid) * (1 - f) + at ((gi + 1) * s.sampleRate / grid) * f;

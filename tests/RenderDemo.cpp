@@ -10,6 +10,26 @@ int main (int argc, char** argv)
     out.createDirectory();
     BitEraProcessor proc;
     proc.setPlayConfigDetails (0, 2, 44100.0, 512);
+    // BitEraRenderDemo <outdir> --all [firstEra lastEra]: the whole bank as <outdir>/<era>/<category>/<nnnn> <name>.wav
+    if (juce::String (argv[2]) == "--all")
+    {
+        const int e0 = argc > 3 ? juce::String (argv[3]).getIntValue() : 0, e1 = argc > 4 ? juce::String (argv[4]).getIntValue() : bitera::numEras - 1;
+        for (int preset = e0 * bitera::presetsPerEra; preset < (e1 + 1) * bitera::presetsPerEra; ++preset)
+        {
+            proc.setPreset (preset);
+            juce::MemoryBlock wav;
+            if (! proc.renderCurrentWav (wav)) { std::cout << "FAIL " << preset << "\n"; continue; }
+            const auto& info = bitera::presetInfo (preset);
+            const auto& E = bitera::era (info.era);
+            auto dir = out.getChildFile (juce::String (info.era + 1).paddedLeft ('0', 2) + " " + E.year + " " + E.shortName)
+                          .getChildFile (bitera::categoryName (info.category));
+            dir.createDirectory();
+            auto f = dir.getChildFile (juce::File::createLegalFileName ("Bit Era " + juce::String (E.year) + " - " + info.name + ".wav"));
+            f.replaceWithData (wav.getData(), wav.getSize());
+            if (preset % 100 == 0) std::cout << preset << "\n";
+        }
+        return 0;
+    }
     for (int a = 2; a < argc; ++a)
     {
         const juce::String arg (argv[a]);
