@@ -54,6 +54,13 @@ rm -f "$OUT/bitera-component.pkg"
 
 if [ -n "${MAC_INST_SIGN_ID:-}" ] && { [ -n "${NOTARY_KEY_PATH:-}" ] || [ -n "${NOTARY_APPLE_ID:-}" ]; }; then
     notarize "$PKG"
-    xcrun stapler staple "$PKG"
+    # the notarization ticket can take a moment to reach Apple's CDN: retry, and ship notarized-but-unstapled at worst
+    # (Gatekeeper then checks the ticket online on first open)
+    stapled=0
+    for i in 1 2 3 4 5 6; do
+        if xcrun stapler staple "$PKG"; then stapled=1; break; fi
+        echo "stapler: ticket not available yet (attempt $i), waiting..."; sleep 30
+    done
+    [ "$stapled" = 1 ] || echo "::warning title=stapler::notarized but not stapled (ticket not on the CDN yet)"
 fi
 echo "Created $PKG"
