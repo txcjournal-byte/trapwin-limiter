@@ -585,8 +585,8 @@ private:
         else
             g.setColour (t.headerInk);
         g.drawText (logo, logoArea.withHeight (36), Justification::bottomLeft);
-        g.setFont (fonts.body (e, 9.5f));
-        g.setColour (t.headerInk.withAlpha (0.65f));
+        g.setFont (fonts.body (e, 11.0f));
+        g.setColour (t.headerInk.withAlpha (0.85f));
         if (e == 6) g.setColour (t.muted);
         g.drawText (String::fromUTF8 ("BY TRAPWIN  \xc2\xb7  ") + era (e).ep, logoArea.withTrimmedTop (38), Justification::topLeft);
 
@@ -614,8 +614,8 @@ private:
         g.setFont (fonts.body (e, 15.0f));
         g.drawText ("<", d.withWidth (34), Justification::centred);
         g.drawText (">", d.withTrimmedLeft (d.getWidth() - 34), Justification::centred);
-        g.setFont (fonts.body (e, 9.0f, false));
-        g.setColour (t.lcdInk.withAlpha (0.7f));
+        g.setFont (fonts.body (e, 11.5f));
+        g.setColour (t.lcdInk.withAlpha (0.85f));
         g.drawText (String (era (e).year) + String::fromUTF8 ("  \xc2\xb7  ") + sound (preset).category, d.withHeight (18).translated (0, 4), Justification::centred);
         g.setColour (t.lcdInk);
         g.setFont (fonts.display (e, e == 5 ? 13.0f : 19.0f));
@@ -736,9 +736,9 @@ private:
         }
 
         // era badge
-        auto badge = Rectangle<float> (r.getX() + 12, r.getY() + 12, 0, 20);
+        auto badge = Rectangle<float> (r.getX() + 12, r.getY() + 12, 0, 22);
         const String txt = String (era (e).ep) + String::fromUTF8 ("  \xc2\xb7  ") + era (e).year;
-        auto f = fonts.body (e, 10.5f);
+        auto f = fonts.body (e, 12.0f);
         badge.setWidth (GlyphArrangement::getStringWidth (f, txt) + 16);
         if (t.frame == FrameStyle::film) badge.translate (8, 4);
         g.setColour (t.frame == FrameStyle::trap || t.frame == FrameStyle::neon ? Colours::black : t.lcd);
