@@ -153,14 +153,23 @@ void Fx::process (float* L, float* R, int num, const FxParams& fp, double bpm, f
         {
             const float levels = std::pow (2.0f, 2.0f + p0 * 14.0f) * 0.5f;
             const float rate = 1000.0f * std::pow (44.1f, p1);
+            const bool crushBits = p0 < 0.97f, crushRate = rate < (float) sr * 0.85f;
+            if (! crushBits && ! crushRate) break;   // 16 bit at full rate = clean: no stair-step artefacts at all
             for (int i = 0; i < num; ++i)
             {
+                if (! crushRate)
+                {
+                    const float a = std::round (L[i] * levels) / levels, c = std::round (R[i] * levels) / levels;
+                    L[i] += (a - L[i]) * mix;
+                    if (R != L) R[i] += (c - R[i]) * mix;
+                    continue;
+                }
                 holdAcc += rate / (float) sr * (1.0f + p2 * (rng.nextFloat() - 0.5f));
                 if (holdAcc >= 1.0f)
                 {
                     holdAcc -= std::floor (holdAcc);
-                    hold[0] = std::round (L[i] * levels) / levels;
-                    hold[1] = std::round (R[i] * levels) / levels;
+                    hold[0] = crushBits ? std::round (L[i] * levels) / levels : L[i];
+                    hold[1] = crushBits ? std::round (R[i] * levels) / levels : R[i];
                 }
                 L[i] += (hold[0] - L[i]) * mix;
                 if (R != L) R[i] += (hold[1] - R[i]) * mix;

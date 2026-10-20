@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "BitEraData.h"
+#include <map>
 #if ! BE_HEADLESS
  #include "PluginEditor.h"
 #endif
@@ -337,22 +338,32 @@ void BitEraProcessor::setPreset (int preset)
 {
     preset = juce::jlimit (0, bitera::numPresets - 1, preset);
     state.state.setProperty ("preset", preset, nullptr);
-    // every parameter back to its default (except the master volume), then the preset's own settings
+    panic = 1;   // the audio thread fades out every sounding note: no overlap with the new sound
+
+    // target values: defaults (master volume stays), then the preset's settings; only changed parameters are sent
+    const auto patch = bitera::buildPatch (preset);
+    std::map<juce::String, float> target;
+    for (auto& pr : patch.params) target[pr.first] = pr.second;
+    static std::map<int, float> trimCache;
+    auto cached = trimCache.find (preset);
+    if (cached != trimCache.end()) target["trim"] = cached->second;
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
-            if (rp->getParameterID() != "volume")
-                rp->setValueNotifyingHost (rp->getDefaultValue());
-    for (int i = 0; i < bitera::numLayers; ++i)
-    {
-        auto steps = stepsTree (i);
-        steps.removeAllProperties (nullptr);
-    }
-    // the preset itself
-    const auto patch = bitera::buildPatch (preset);
-    for (auto& pr : patch.params) setParam (pr.first, pr.second);
+        {
+            const auto id = rp->getParameterID();
+            if (id == "volume") continue;
+            auto it = target.find (id);
+            const float norm = it != target.end() ? rp->convertTo0to1 (it->second) : rp->getDefaultValue();
+            if (std::abs (norm - rp->getValue()) > 1.0e-6f) rp->setValueNotifyingHost (norm);
+        }
+    for (int i = 0; i < bitera::numLayers; ++i) stepsTree (i).removeAllProperties (nullptr);
     for (auto& st : patch.steps) stepsTree (st.layer).setProperty (juce::String (st.field) + juce::String (st.step), st.value, nullptr);
     pushSteps();
-    levelPreset();
+    if (cached == trimCache.end())
+    {
+        levelPreset();
+        trimCache[preset] = state.getParameter ("trim")->convertFrom0to1 (state.getParameter ("trim")->getValue());
+    }
 }
 
 juce::ValueTree BitEraProcessor::stepsTree (int layer)
@@ -407,7 +418,8 @@ bool BitEraProcessor::getSoundWav (int preset, juce::MemoryBlock& out) const
 
 void BitEraProcessor::previewPreset (int preset)
 {
-    setPreset (preset);
+    if (preset != getPreset()) setPreset (preset);
+    else panic = 1;   // replay: cut the previous audition
     previewRequest = preset;
 }
 
@@ -453,10 +465,15 @@ void BitEraProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
 
     // play buttons in the editor: a note on the sound's own key at the start of this block
+    if (panic.exchange (0) != 0)
+    {
+        engine.allNotesOff (true);
+        previewPlaying = -1; previewing = -1;
+    }
     if (previewStop.exchange (0) != 0 && previewPlaying >= 0)
     {
         midi.addEvent (juce::MidiMessage::noteOff (1, previewPlaying), 0);
-        previewPlaying = -1;
+        previewPlaying = -1; previewing = -1;
     }
     const int req = previewRequest.exchange (-1);
     if (req >= 0)
@@ -464,14 +481,25 @@ void BitEraProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         if (previewPlaying >= 0)
             midi.addEvent (juce::MidiMessage::noteOff (1, previewPlaying), 0);
         previewPlaying = previewNote (req);
+        previewing = req;
+        previewLeft = (juce::int64) (getSoundLengthSeconds (req) * getSampleRate());
         midi.addEvent (juce::MidiMessage::noteOn (1, previewPlaying, (juce::uint8) 110), 0);
+    }
+    else if (previewPlaying >= 0)
+    {
+        // a preview is a short audition: the key is released after the sound's length
+        previewLeft -= buffer.getNumSamples();
+        if (previewLeft <= 0)
+        {
+            midi.addEvent (juce::MidiMessage::noteOff (1, previewPlaying), 0);
+            previewPlaying = -1; previewing = -1;
+        }
     }
     engine.process (buffer, midi, params);
 }
 
-int BitEraProcessor::renderNote (bitera::EngineParams& p, int note, double holdSec, double maxTailSec, juce::AudioBuffer<float>& result)
+int BitEraProcessor::renderNote (bitera::EngineParams& p, int note, double holdSec, double maxTailSec, juce::AudioBuffer<float>& result, double rate)
 {
-    constexpr double rate = 44100.0;
     constexpr int block = 512;
     bitera::Engine offline;
     offline.setBank (&bank);
@@ -507,9 +535,9 @@ void BitEraProcessor::levelPreset()
     bitera::EngineParams p;
     readParams (p, true);
     p.volumeDb = 0.0f; p.trimDb = 0.0f;
-    const double hold = juce::jlimit (0.3, 1.2, getSoundLengthSeconds (getPreset()));
+    const double hold = juce::jlimit (0.3, 0.8, getSoundLengthSeconds (getPreset()));
     juce::AudioBuffer<float> buf;
-    const int n = renderNote (p, previewNote (getPreset()), hold, 0.2, buf);
+    const int n = renderNote (p, previewNote (getPreset()), hold, 0.1, buf, 22050.0);
     float peak = 0.0f; double sum = 0.0;
     for (int c = 0; c < 2; ++c)
         for (int i = 0; i < n; ++i) { const float v = buf.getSample (c, i); peak = juce::jmax (peak, std::abs (v)); sum += (double) v * v; }
@@ -520,14 +548,14 @@ void BitEraProcessor::levelPreset()
     setParam ("trim", juce::jlimit (-24.0f, 24.0f, juce::Decibels::gainToDecibels (g)));
 }
 
-bool BitEraProcessor::renderCurrentWav (juce::MemoryBlock& out)
+bool BitEraProcessor::renderCurrentWav (juce::MemoryBlock& out, int note)
 {
     constexpr double rate = 44100.0;
     bitera::EngineParams p;
     readParams (p, true);
     const double holdSec = juce::jlimit (0.3, 12.0, getSoundLengthSeconds (getPreset()) + 0.05);
     juce::AudioBuffer<float> result;
-    const int written = renderNote (p, previewNote (getPreset()), holdSec, 8.0, result);
+    const int written = renderNote (p, note >= 0 ? note : previewNote (getPreset()), holdSec, 8.0, result);
     // trim the silent end
     int end = written;
     while (end > 1 && std::abs (result.getSample (0, end - 1)) < 1.0e-4f && std::abs (result.getSample (1, end - 1)) < 1.0e-4f) --end;

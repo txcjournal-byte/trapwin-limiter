@@ -45,11 +45,12 @@ public:
     void setPreset (int preset);          // loads the preset into all parameters
     void previewPreset (int preset);      // loads + plays it at its root key (the play buttons)
     void stopPreview();
+    int previewingPreset() const { return previewing.load(); }   // -1 when no audition is playing
     double getSoundLengthSeconds (int preset) const;
     int previewNote (int preset) const;
     bool getSoundWav (int preset, juce::MemoryBlock& out) const;   // the era sound as it is
     // renders what the instrument plays right now (layers, arp, FX, master) at the preset's root key to a WAV
-    bool renderCurrentWav (juce::MemoryBlock& out);
+    bool renderCurrentWav (juce::MemoryBlock& out, int note = -1);   // note -1 = the preset's root key
 
     // arp / sequencer step tables: field = "vel", "gate", "pan", "note", "wave", "on"
     float getStep (int layer, const char* field, int step) const;
@@ -72,7 +73,7 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void loadBank();
     void readParams (bitera::EngineParams& p, bool messageThread = false);
-    int renderNote (bitera::EngineParams& p, int note, double holdSec, double maxTailSec, juce::AudioBuffer<float>& result);
+    int renderNote (bitera::EngineParams& p, int note, double holdSec, double maxTailSec, juce::AudioBuffer<float>& result, double rate = 44100.0);
     void levelPreset();
     void setParam (const juce::String& id, float value);
     void pushSteps();   // message thread: copy the step tables for the audio thread
@@ -82,8 +83,9 @@ private:
     bitera::Engine engine;
     bitera::EngineParams params;
 
-    std::atomic<int> previewRequest { -1 }, previewStop { 0 };
+    std::atomic<int> previewRequest { -1 }, previewStop { 0 }, panic { 0 }, previewing { -1 };
     int previewPlaying = -1;
+    juce::int64 previewLeft = 0;
 
     // all parameter values, looked up once
     std::atomic<float>* get (const juce::String& id) const { return state.getRawParameterValue (id); }

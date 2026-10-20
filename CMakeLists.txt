@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # BIT ERA by TrapWin - its own project, built from this folder: cmake -S bitera -B build-bitera
 # Version lives here only (CI reads it from this line for the installers).
-project(BIT_ERA VERSION 0.4.0 LANGUAGES C CXX)
+project(BIT_ERA VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,7 +34,7 @@ juce_add_plugin(BitEra
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     VST3_CATEGORIES Instrument Synth
     AU_MAIN_TYPE kAudioUnitType_MusicDevice
     FORMATS VST3 AU Standalone
@@ -99,6 +99,11 @@ if(BE_BUILD_TESTS)
         JucePlugin_Name="Bit Era" JucePlugin_IsSynth=1 JucePlugin_WantsMidiInput=1 JucePlugin_ProducesMidiOutput=0
         JucePlugin_IsMidiEffect=0 JucePlugin_VersionString="${PROJECT_VERSION}" JucePlugin_Build_Standalone=0)
     target_link_libraries(BitEraSnapshot PRIVATE BitEraData juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+
+    juce_add_console_app(BitEraPatchDump PRODUCT_NAME "BitEraPatchDump")
+    target_sources(BitEraPatchDump PRIVATE tests/PatchDump.cpp Source/Eras.cpp Source/Chips.cpp Source/Engine.cpp Source/Fx.cpp Source/Presets.cpp)
+    target_compile_definitions(BitEraPatchDump PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(BitEraPatchDump PRIVATE juce::juce_graphics juce::juce_audio_basics juce::juce_dsp juce::juce_recommended_config_flags)
 
     # demo renders of chosen presets (for listening without a DAW)
     juce_add_console_app(BitEraRenderDemo PRODUCT_NAME "BitEraRenderDemo")

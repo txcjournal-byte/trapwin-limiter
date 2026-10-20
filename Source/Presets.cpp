@@ -33,7 +33,7 @@ const char* adjectives[numEras][25] = {
       "Soft", "Polaroid", "Melancholy", "Gentle", "Hush", "Station", "Umbrella", "Train", "Balcony", "Streetlamp", "Notebook", "Tea", "Sleepy" },
     { "Inferno", "Chained", "Blade", "Wall", "Crimson", "Overlord", "Vanguard", "Ashen", "Slayer", "Hellfire", "Molten", "Wrath", "Cursed",
       "Demon", "Ironclad", "Furnace", "Abyss", "Scorch", "Brimstone", "Onslaught", "Warcry", "Titan Fall", "Colossal", "Fury", "Ruinous" },
-    { "Underground", "Trap", "Rage", "Drill", "Phonk", "Cage", "Opium", "Block", "Smoke", "Concrete", "Plug", "Dark", "Cold", "Ice", "Shadow",
+    { "Underground", "Vault", "Rage", "Drill", "Phonk", "Cage", "Opium", "Block", "Smoke", "Concrete", "Plug", "Dark", "Cold", "Ice", "Shadow",
       "Drip", "Basement", "Street", "Knockout", "Venom", "Pressure", "Night Shift", "Hoodie", "Codeine Sky", "Last Round" },
 };
 
@@ -179,7 +179,7 @@ struct Builder
             L (l, "src", (float) src);
             L (l, "wave", (float) pick (wavesFor (src, cat)));
         }
-        L (l, "char", rnd (0.15f, 0.85f));
+        L (l, "char", rnd (0.25f, 0.85f));
     }
 
     void chipSource (int l, std::initializer_list<int> preferred)
@@ -190,7 +190,7 @@ struct Builder
         const int src = pick (avail);
         L (l, "src", (float) src);
         L (l, "wave", (float) pick (wavesFor (src, cat)));
-        L (l, "char", rnd (0.15f, 0.85f));
+        L (l, "char", rnd (0.25f, 0.85f));
     }
 
     void env (int l, float a, float d, float s, float rel) { L (l, "attack", a); L (l, "decay", d); L (l, "sustain", s); L (l, "release", rel); }
@@ -223,92 +223,299 @@ struct Builder
     }
 };
 
-void designBass (Builder& b)
+// ---- game idioms -------------------------------------------------------------------------------------------------
+// a looping note pattern on a layer (the classic chip "arpeggio chord", trills, octave bounces)
+void pattern (Builder& b, int l, std::initializer_list<int> notes, int rate, int end = aeLoop, float gate = 1.0f)
 {
-    b.source (0, 0.25f);
-    b.env (0, b.rnd (0, 4), b.rndExp (150, 900), b.rnd (0.0f, 0.8f), b.rndExp (40, 250));
-    if (b.chance (0.6f)) b.filter (0, b.chance (0.6f) ? fLp24 : fLp12, b.rndExp (250, 3000), b.rnd (0.0f, 0.65f), b.rnd (0.2f, 0.7f), 1, b.rndExp (80, 500), b.rnd (0, 0.3f), 200);
-    if (b.chance (0.45f)) { b.L (0, "mode", b.chance (0.5f) ? vmMono : vmLegato); b.L (0, "glide", b.chance (0.5f) ? b.rnd (10, 90) : 0.0f); }
-    b.L (0, "vel", b.rnd (0.2f, 0.7f));
-    if (b.chance (0.5f))   // sub or octave layer
-    {
-        b.L (1, "on", 1);
-        b.chipSource (1, { chips::console8, chips::handheld4, chips::computerSid, chips::psg, chips::polyCounter });
-        const bool sub = b.chance (0.6f);
-        b.L (1, "coarse", sub ? -12.0f : 12.0f); b.L (1, "level", sub ? b.rnd (0.45f, 0.7f) : b.rnd (0.2f, 0.4f));
-        b.env (1, 1, b.rndExp (200, 900), b.rnd (0.3f, 0.9f), 120);
-    }
-    if (b.chance (0.35f)) b.fx (0, 0, fxDrive, b.rnd (0.1f, 0.45f), (float) b.r.nextInt (5) / 4.0f, b.rnd (0.4f, 0.8f), b.rnd (0.4f, 1.0f));
-    if (b.chance (0.3f)) b.mod (msVelocity, mdCutoff, b.rnd (0.2f, 0.5f), 1);
+    b.L (l, "arp", amSeq); b.L (l, "arprate", (float) rate); b.L (l, "arpsteps", (float) notes.size());
+    b.L (l, "arpend", (float) end); b.L (l, "arpgate", gate);
+    int s = 0;
+    for (int n : notes) b.p.steps.push_back ({ l, "note", s++, (float) n });
 }
 
-void designLead (Builder& b)
+const std::vector<std::vector<int>> chords { { 0, 4, 7 }, { 0, 3, 7 }, { 0, 4, 7, 12 }, { 0, 3, 7, 10 }, { 0, 5, 7 }, { 0, 4, 7, 11 }, { 0, 7, 12 }, { 0, 3, 7, 12 } };
+void chordPattern (Builder& b, int l, int rate)
 {
-    b.source (0, 0.2f);
-    b.env (0, b.rnd (0, 30), b.rndExp (200, 1500), b.rnd (0.5f, 1.0f), b.rndExp (80, 500));
-    b.L (0, "vibdepth", b.rnd (0, 25)); b.L (0, "vibrate", b.rnd (4.5f, 6.5f));
-    if (b.chance (0.55f)) { b.L (0, "mode", b.chance (0.5f) ? vmMono : vmLegato); b.L (0, "glide", b.rnd (15, 150)); }
-    if (b.chance (0.35f)) b.filter (0, fLp12, b.rndExp (1500, 9000), b.rnd (0, 0.5f), b.rnd (0.1f, 0.5f), 1, b.rndExp (150, 700), b.rnd (0.3f, 0.8f), 200);
-    if (b.chance (0.45f))
-    {
-        b.L (1, "on", 1); b.source (1, 0.1f);
-        const bool oct = b.chance (0.4f);
-        b.L (1, "coarse", oct ? 12.0f : 0.0f); b.L (1, "fine", oct ? 0.0f : b.rnd (6, 15) * (b.chance (0.5f) ? 1.0f : -1.0f));
-        b.L (1, "level", b.rnd (0.35f, 0.65f)); b.L (1, "pan", b.rnd (-0.3f, 0.3f));
-        b.env (1, b.rnd (0, 30), b.rndExp (200, 1500), b.rnd (0.5f, 1.0f), b.rndExp (80, 500));
-    }
-    if (b.chance (0.5f)) b.fx (0, 0, fxDelay, b.pick (std::vector<float> { 0.42f, 0.58f, 0.67f }), b.rnd (0.2f, 0.5f), b.chance (0.3f) ? 0.9f : 0.0f, b.rnd (0.15f, 0.35f));
-    if (b.chance (0.25f)) b.layerFx (0, 1, b.rnd (0.3f, 0.7f));
-    if (b.chance (0.3f)) b.mod (msLfo1, mdPan, 0.2f);
+    const auto& c = chords[(size_t) b.r.nextInt ((int) chords.size())];
+    b.L (l, "arp", amSeq); b.L (l, "arprate", (float) rate); b.L (l, "arpsteps", (float) c.size()); b.L (l, "arpgate", 1.0f);
+    for (size_t i = 0; i < c.size(); ++i) b.p.steps.push_back ({ l, "note", (int) i, (float) c[i] });
 }
 
-void designPad (Builder& b)
+constexpr int r64 = 12, r128 = 13, r32 = 8, r16 = 7, r8 = 6, r16t = 11;
+
+void chipLead (Builder& b, int l = 0) { b.chipSource (l, { chips::console8, chips::handheld4, chips::psg, chips::computerSid, chips::polyCounter }); }
+
+void designBass (Builder& b, int v)
 {
-    const int layers = 2 + (b.chance (0.4f) ? 1 : 0);
+    switch (v % 8)
+    {
+        case 0:   // triangle / sine sub: the console bass channel
+            b.chipSource (0, { chips::console8, chips::handheld4, chips::computerSid, chips::psg });
+            b.env (0, 1, b.rndExp (250, 900), b.rnd (0.5f, 0.9f), 60);
+            break;
+        case 1:   // octave bounce
+            b.source (0, 0.2f); b.env (0, 0, 180, 0.6f, 50);
+            pattern (b, 0, { 0, 12 }, b.chance (0.5f) ? r16 : r8, aeLoop, b.rnd (0.5f, 0.85f));
+            break;
+        case 2:   // plucked pulse bass with a filter snap
+            b.source (0, 0.15f); b.env (0, 0, b.rndExp (120, 350), 0.0f, 60);
+            b.filter (0, fLp24, b.rndExp (300, 1200), b.rnd (0.3f, 0.7f), b.rnd (0.4f, 0.8f), 1, b.rndExp (60, 200), 0, 80);
+            break;
+        case 3:   // slap / FM bass
+            b.chipSource (0, { chips::fm16, chips::pcFm, chips::computerSid, chips::handheld4 });
+            b.env (0, 0, b.rndExp (200, 600), b.rnd (0.2f, 0.5f), 80);
+            b.L (0, "penv", b.rnd (0.5f, 3.0f)); b.L (0, "pdecay", 25);
+            break;
+        case 4:   // 808-style glide bass: pitch punch, long tail, glides between notes
+            b.chipSource (0, { chips::handheld4, chips::console8, chips::computerSid, chips::fm16, chips::psg });
+            if (b.e >= 9 && b.chance (0.5f)) { b.L (0, "src", (float) chips::eraSample); b.L (0, "wave", 11 * soundsPerEra + 1); }
+            b.env (0, 0, b.rndExp (900, 2500), 0.0f, 300);
+            b.L (0, "penv", b.rnd (7, 14)); b.L (0, "pdecay", b.rnd (30, 70));
+            b.L (0, "mode", vmLegato); b.L (0, "glide", b.rnd (40, 110));
+            b.fx (0, 0, fxDrive, b.rnd (0.15f, 0.4f), 0.0f, 0.6f, b.rnd (0.3f, 0.7f));
+            break;
+        case 5:   // wobble: synced LFO on a resonant filter
+            b.source (0, 0.1f); b.env (0, 1, 800, 0.9f, 120);
+            b.filter (0, fLp24, b.rndExp (300, 900), b.rnd (0.45f, 0.75f), 0.0f, 1, 300, 1, 100);
+            b.set ("lfo1_sync", (float) b.pick (std::vector<int> { 6, 7, 10 })); b.set ("lfo1_shape", (float) b.pick (std::vector<int> { lsSine, lsTriangle, lsSquare }));
+            b.mod (msLfo1, mdCutoff, b.rnd (0.25f, 0.45f));
+            break;
+        case 6:   // buzz bass
+            b.chipSource (0, { chips::psg, chips::polyCounter, chips::console8, chips::handheld4 });
+            b.env (0, 0, 600, 0.8f, 60);
+            b.fx (0, 0, fxDrive, b.rnd (0.3f, 0.6f), b.rnd (0.0f, 0.6f), 0.5f, 0.8f);
+            break;
+        default:  // detuned double bass (reese)
+            for (int l = 0; l < 2; ++l)
+            {
+                b.L (l, "on", 1); b.source (l, 0.05f); b.env (l, 3, 900, 0.85f, 120);
+                b.L (l, "fine", l == 0 ? -b.rnd (8, 16) : b.rnd (8, 16)); b.L (l, "level", 0.6f); b.L (l, "pan", l == 0 ? -0.2f : 0.2f);
+                b.filter (l, fLp24, b.rndExp (500, 1600), 0.3f, 0.2f, 1, 300, 0.4f, 100);
+            }
+            break;
+    }
+    if (v % 8 != 7 && b.chance (0.35f))   // sub layer
+    {
+        b.L (1, "on", 1); b.chipSource (1, { chips::console8, chips::handheld4, chips::computerSid, chips::psg });
+        b.L (1, "coarse", -12); b.L (1, "level", b.rnd (0.35f, 0.55f)); b.env (1, 1, 700, 0.7f, 100);
+    }
+    b.L (0, "vel", b.rnd (0.2f, 0.6f));
+}
+
+void designLead (Builder& b, int v)
+{
+    switch (v % 10)
+    {
+        case 0:   // classic pulse lead with a late vibrato
+            chipLead (b); b.env (0, 2, 800, 0.8f, 120);
+            b.L (0, "vibdepth", b.rnd (12, 30)); b.L (0, "vibrate", b.rnd (5.0f, 7.0f));
+            break;
+        case 1:   // duty / pulse-width motion
+            b.chipSource (0, { chips::console8, chips::computerSid, chips::handheld4 });
+            b.env (0, 2, 800, 0.85f, 150);
+            b.set ("lfo2_rate", b.rnd (0.4f, 3.0f)); b.set ("lfo2_shape", lsTriangle);
+            b.mod (msLfo1 + 1, mdChar, b.rnd (0.3f, 0.6f));
+            break;
+        case 2:   // echo lead: the "second channel" echo
+            chipLead (b); b.env (0, 2, 600, 0.75f, 150);
+            b.fx (0, 0, fxDelay, b.pick (std::vector<float> { 0.58f, 0.67f, 0.42f }), b.rnd (0.35f, 0.55f), 0.45f, b.rnd (0.3f, 0.45f));
+            b.L (0, "vibdepth", b.rnd (6, 18));
+            break;
+        case 3:   // chip chord: one key plays a whole chord as a super fast arpeggio
+            chipLead (b); b.env (0, 0, 900, 0.9f, 120);
+            chordPattern (b, 0, b.chance (0.6f) ? r64 : r128);
+            break;
+        case 4:   // octave double
+            chipLead (b); b.env (0, 2, 800, 0.8f, 150);
+            b.L (1, "on", 1); chipLead (b, 1);
+            b.L (1, "coarse", 12); b.L (1, "level", 0.4f); b.env (1, 2, 800, 0.8f, 150);
+            b.L (0, "vibdepth", 10); b.L (1, "vibdepth", 14);
+            break;
+        case 5:   // portamento lead
+            b.source (0, 0.15f); b.env (0, 5, 900, 0.9f, 150);
+            b.L (0, "mode", vmLegato); b.L (0, "glide", b.rnd (60, 180));
+            b.L (0, "vibdepth", b.rnd (10, 25));
+            break;
+        case 6:   // bend-in lead: every note slides up into pitch
+            chipLead (b); b.env (0, 2, 700, 0.8f, 120);
+            b.L (0, "penv", -b.rnd (1.0f, 3.0f)); b.L (0, "pdecay", b.rnd (50, 120));
+            b.L (0, "vibdepth", b.rnd (8, 20));
+            break;
+        case 7:   // FM / metal / sync lead with drive
+            b.chipSource (0, { chips::fm16, chips::computerSid, chips::pcFm, chips::handheld4 });
+            b.env (0, 2, 900, 0.8f, 150);
+            b.fx (0, 0, fxDrive, b.rnd (0.2f, 0.45f), b.rnd (0.0f, 0.8f), 0.7f, 0.6f);
+            break;
+        case 8:   // square + noise breath
+            chipLead (b); b.env (0, 15, 700, 0.85f, 150);
+            b.L (1, "on", 1); b.L (1, "src", (float) chips::psg); b.L (1, "wave", 3); b.L (1, "level", 0.2f);
+            b.filter (1, fBp12, 3000, 0.3f, 0, 1, 200, 0, 100); b.env (1, 10, 300, 0.4f, 100);
+            b.L (0, "vibdepth", 12);
+            break;
+        default:  // trill
+            chipLead (b); b.env (0, 1, 800, 0.85f, 120);
+            pattern (b, 0, { 0, b.chance (0.5f) ? 1 : 2 }, b.chance (0.5f) ? r64 : r32);
+            break;
+    }
+    if (b.chance (0.3f)) b.layerFx (0, 1, b.rnd (0.25f, 0.6f));
+}
+
+void designPad (Builder& b, int v)
+{
+    const int kind = v % 6;
+    const int layers = kind == 0 ? 1 : 2;
     for (int l = 0; l < layers; ++l)
     {
         b.L (l, "on", 1); b.source (l, 0.3f);
-        b.env (l, b.rndExp (300, 2500), b.rndExp (500, 3000), b.rnd (0.6f, 1.0f), b.rndExp (800, 4000));
-        b.L (l, "fine", l == 0 ? 0.0f : b.rnd (5, 14) * (l % 2 ? 1.0f : -1.0f));
-        b.L (l, "coarse", l == 2 ? (b.chance (0.5f) ? 12.0f : -12.0f) : 0.0f);
-        b.L (l, "level", l == 0 ? 0.6f : b.rnd (0.35f, 0.5f)); b.L (l, "pan", l == 0 ? 0.0f : (l % 2 ? -0.4f : 0.4f));
-        b.filter (l, fLp12, b.rndExp (800, 6000), b.rnd (0, 0.4f), b.rnd (0, 0.3f), b.rndExp (300, 2000), 1500, 0.6f, 2000);
-        b.L (l, "vibdepth", b.rnd (0, 10));
+        b.env (l, b.rndExp (300, 1800), 2000, b.rnd (0.7f, 1.0f), b.rndExp (900, 3500));
+        b.L (l, "fine", l == 0 ? 0.0f : b.rnd (6, 14));
+        b.L (l, "level", l == 0 ? 0.6f : 0.45f); b.L (l, "pan", l == 0 ? -0.25f : 0.25f);
     }
-    b.set ("lfo1_rate", b.rndExp (0.08f, 0.6f)); b.set ("lfo1_shape", (float) b.pick (std::vector<int> { lsSine, lsTriangle, lsSmoothRandom }));
-    b.mod (msLfo1, mdCutoff, b.rnd (0.1f, 0.35f));
-    b.fx (0, 0, fxChorus, b.rnd (0.1f, 0.4f), b.rnd (0.3f, 0.7f), 0.5f, b.rnd (0.3f, 0.6f));
-    b.fx (-1, 0, fxReverb, b.rnd (0.5f, 0.9f), b.rnd (0.3f, 0.6f), 1.0f, b.rnd (0.3f, 0.6f));
+    switch (kind)
+    {
+        case 0: chordPattern (b, 0, r64); b.fx (0, 0, fxConsoleEcho, 0.3f, 0.45f, 0.5f, 0.35f); break;   // chord-arp pad
+        case 1: b.set ("lfo2_rate", b.rnd (0.15f, 0.8f)); b.mod (msLfo1 + 1, mdChar, 0.45f); break;   // PWM pad
+        case 2: for (int l = 0; l < 2; ++l) b.L (l, "vibdepth", b.rnd (6, 14)); b.fx (0, 0, fxChorus, 0.25f, 0.6f, 0.6f, 0.5f); break;
+        case 3: b.L (1, "coarse", 12); b.fx (0, 0, fxReverb, 0.8f, 0.3f, 1.0f, 0.5f); break;   // shimmer octave
+        case 4:   // slow filter sweep
+            for (int l = 0; l < 2; ++l) b.filter (l, fLp24, b.rndExp (400, 1500), b.rnd (0.3f, 0.6f), 0.0f, 1, 300, 1, 300);
+            b.set ("lfo1_rate", b.rnd (0.05f, 0.25f)); b.set ("lfo1_retrig", 0); b.mod (msLfo1, mdCutoff, b.rnd (0.3f, 0.5f));
+            break;
+        default:  // tremolo pad
+            b.fx (0, 0, fxTremolo, b.rnd (0.45f, 0.7f), b.rnd (0.3f, 0.6f), b.chance (0.5f) ? 0.8f : 0.2f, 1.0f);
+            break;
+    }
+    b.fx (-1, 0, fxReverb, b.rnd (0.5f, 0.85f), b.rnd (0.3f, 0.6f), 1.0f, b.rnd (0.25f, 0.45f));
 }
 
-void designKeys (Builder& b)
+void designKeys (Builder& b, int v)
 {
-    b.source (0, 0.4f);
-    b.env (0, b.rnd (0, 5), b.rndExp (600, 3000), b.rnd (0, 0.4f), b.rndExp (150, 600));
+    switch (v % 5)
+    {
+        case 0: b.chipSource (0, { chips::fm16, chips::pcFm, chips::handheld4, chips::computerSid }); b.env (0, 0, b.rndExp (900, 2500), 0.1f, 300); break;   // FM e-piano
+        case 1:   // chip piano: pulse with a bell tine
+            b.chipSource (0, { chips::console8, chips::handheld4, chips::psg, chips::computerSid }); b.env (0, 0, b.rndExp (400, 1200), 0.0f, 200);
+            b.filter (0, fLp12, 3000, 0.1f, 0.4f, 1, 300, 0, 200);
+            b.L (1, "on", 1); b.chipSource (1, { chips::handheld4, chips::console8, chips::fm16, chips::computerSid });
+            b.L (1, "coarse", 12); b.L (1, "level", 0.3f); b.env (1, 0, 300, 0, 150);
+            break;
+        case 2: b.chipSource (0, { chips::pcFm, chips::fm16, chips::computerSid, chips::console8 }); b.env (0, 0, b.rndExp (300, 800), 0.0f, 120); break;   // clav
+        case 3:   // toy piano
+            b.source (0, 0.3f); b.L (0, "coarse", 12); b.env (0, 0, b.rndExp (300, 900), 0.0f, 200);
+            b.fx (0, 0, fxReverb, 0.4f, 0.4f, 1.0f, 0.3f);
+            break;
+        default: b.source (0, 0.6f); b.env (0, 0, b.rndExp (900, 3000), 0.2f, 300); break;   // era piano / sampled keys
+    }
     b.L (0, "vel", b.rnd (0.5f, 0.9f));
-    if (b.chance (0.3f)) { b.L (1, "on", 1); b.chipSource (1, { chips::fm16, chips::handheld4, chips::computerSid, chips::pcFm });
-                           b.L (1, "coarse", b.chance (0.5f) ? 12.0f : 19.0f); b.L (1, "level", b.rnd (0.15f, 0.3f)); b.env (1, 0, b.rndExp (200, 800), 0, 200); }
-    if (b.chance (0.4f)) b.layerFx (0, 0, b.rnd (0.2f, 0.5f));
-    b.mod (msVelocity, mdCutoff, 0.4f);
-    if (b.chance (0.5f)) b.filter (0, fLp12, b.rndExp (2000, 12000), 0.1f, b.rnd (0.1f, 0.4f), 1, 600, 0.2f, 300);
+    b.mod (msVelocity, mdCutoff, 0.35f);
 }
 
-void designPluck (Builder& b)
+void designPluck (Builder& b, int v)
 {
-    b.source (0, 0.25f);
-    b.env (0, b.rnd (0, 3), b.rndExp (120, 700), 0.0f, b.rndExp (80, 400));
-    b.filter (0, b.chance (0.5f) ? fLp24 : fLp12, b.rndExp (400, 3000), b.rnd (0, 0.6f), b.rnd (0.3f, 0.8f), 1, b.rndExp (60, 400), 0, 150);
-    if (b.chance (0.6f)) b.fx (0, 0, b.pick (std::vector<int> { fxDelay, fxConsoleEcho }), b.rnd (0.3f, 0.7f), b.rnd (0.25f, 0.55f), b.rnd (0.0f, 0.6f), b.rnd (0.2f, 0.45f));
-    if (b.chance (0.3f)) { b.L (1, "on", 1); b.source (1, 0.1f); b.L (1, "coarse", 12); b.L (1, "level", 0.3f); b.env (1, 0, b.rndExp (80, 300), 0, 100); }
+    switch (v % 6)
+    {
+        case 0: chipLead (b); b.env (0, 0, b.rndExp (120, 400), 0, 100); b.fx (0, 0, fxDelay, 0.58f, 0.45f, 0.45f, 0.35f); break;
+        case 1: b.chipSource (0, { chips::computerSid, chips::console8, chips::handheld4 });
+                b.env (0, 0, 500, 0, 150); b.filter (0, fLp24, b.rndExp (300, 900), b.rnd (0.4f, 0.75f), b.rnd (0.5f, 0.9f), 1, b.rndExp (60, 220), 0, 100); break;
+        case 2: b.chipSource (0, { chips::fm16, chips::pcFm, chips::handheld4 }); b.env (0, 0, b.rndExp (200, 600), 0, 150); break;
+        case 3: b.source (0, 0.3f); b.env (0, 0, b.rndExp (300, 900), 0, 200); b.L (0, "penv", b.rnd (0.6f, 2.0f)); b.L (0, "pdecay", 40); break;   // koto bend
+        case 4: b.source (0, 0.4f); b.env (0, 0, b.rndExp (500, 1500), 0, 400); b.fx (0, 0, fxReverb, 0.6f, 0.4f, 1.0f, 0.35f); break;   // harp
+        default:  // kalimba
+            b.chipSource (0, { chips::handheld4, chips::fm16, chips::console8, chips::psg }); b.L (0, "coarse", 12);
+            b.env (0, 0, b.rndExp (250, 600), 0, 200); b.fx (0, 0, fxConsoleEcho, 0.25f, 0.35f, 0.4f, 0.3f);
+            break;
+    }
 }
 
-void designBells (Builder& b)
+void designBells (Builder& b, int v)
 {
-    b.source (0, 0.3f);
-    b.env (0, b.rnd (0, 4), b.rndExp (900, 4000), 0.0f, b.rndExp (500, 2500));
-    if (b.chance (0.45f)) { b.L (1, "on", 1); b.source (1, 0.2f); b.L (1, "coarse", b.chance (0.5f) ? 12.0f : 19.0f); b.L (1, "level", b.rnd (0.2f, 0.45f)); b.env (1, 0, b.rndExp (400, 2000), 0, 800); }
-    b.fx (-1, 0, fxReverb, b.rnd (0.4f, 0.8f), b.rnd (0.2f, 0.5f), 1.0f, b.rnd (0.25f, 0.5f));
-    if (b.chance (0.3f)) b.fx (0, 0, fxConsoleEcho, b.rnd (0.2f, 0.6f), b.rnd (0.3f, 0.5f), b.rnd (0, 1), 0.3f);
+    switch (v % 5)
+    {
+        case 0: b.chipSource (0, { chips::fm16, chips::pcFm, chips::handheld4 }); b.env (0, 0, b.rndExp (1200, 3500), 0, 1200); break;
+        case 1:   // music box
+            b.source (0, 0.4f); b.L (0, "coarse", 12); b.env (0, 0, b.rndExp (600, 1500), 0, 600);
+            b.fx (0, 0, fxReverb, 0.6f, 0.3f, 1.0f, 0.35f); break;
+        case 2: b.chipSource (0, { chips::computerSid, chips::fm16, chips::handheld4 }); b.L (0, "wave", 7); b.env (0, 0, 1500, 0, 800); break;   // ring bell
+        case 3: b.chipSource (0, { chips::console8, chips::handheld4, chips::psg }); b.L (0, "coarse", 12); b.env (0, 0, b.rndExp (200, 500), 0, 200); break;   // glock
+        default:  // chime run: one key rings a little up-run
+            b.source (0, 0.3f); b.env (0, 0, 700, 0, 500);
+            pattern (b, 0, { 0, 7, 12, 19 }, r32, aeOneShot, 0.9f);
+            break;
+    }
+    b.fx (-1, 0, fxReverb, b.rnd (0.4f, 0.8f), b.rnd (0.2f, 0.5f), 1.0f, b.rnd (0.25f, 0.45f));
+}
+
+const char* fxNouns[20] = { "Coin", "1-Up", "Jump", "Power-Up", "Hurt", "Laser", "Explosion", "Menu Select", "Menu Back", "Pause",
+                            "Teleport", "Game Over", "Stage Clear", "Fireball", "Splash", "Alarm", "Hover Engine", "Text Blip", "Boss Roar", "Charge Up" };
+
+void designFx (Builder& b, int v)
+{
+    auto chip = [&] (int l)   // a tonal chip voice (lead waves, not noise)
+    {
+        const int keep = b.cat; b.cat = cLead;
+        b.chipSource (l, { chips::console8, chips::handheld4, chips::psg, chips::computerSid, chips::polyCounter, chips::fm16 });
+        b.cat = keep;
+    };
+    auto noise = [&] (int l) { b.L (l, "src", (float) chips::psg); b.L (l, "wave", 3); };
+    switch (v % 20)
+    {
+        case 0: chip (0); b.env (0, 0, 400, 0.7f, 250); pattern (b, 0, { 0, 5 }, r16, aeHold, 1.0f); b.L (0, "coarse", 12); break;   // coin: B -> E
+        case 1: chip (0); b.env (0, 0, 120, 0.8f, 60); pattern (b, 0, { 0, 4, 7, 12, 16, 19 }, r16, aeOneShot, 0.9f); b.L (0, "coarse", 12); break;   // 1-up
+        case 2: chip (0); b.env (0, 0, 220, 0, 60); b.L (0, "penv", -b.rnd (5, 12)); b.L (0, "pdecay", b.rnd (60, 140)); break;   // jump
+        case 3: chip (0); b.env (0, 0, 100, 0.6f, 60); pattern (b, 0, { 0, 7, 12, 4, 11, 16, 7, 14, 19, 12, 19, 24 }, r64, aeOneShot, 0.9f); break;   // power-up
+        case 4: chip (0); b.env (0, 0, 300, 0, 80); b.L (0, "penv", 7); b.L (0, "pdecay", 120);   // hurt
+                b.L (1, "on", 1); noise (1); b.env (1, 0, 150, 0, 50); b.L (1, "level", 0.4f); break;
+        case 5: chip (0); b.L (0, "penv", b.rnd (24, 40)); b.L (0, "pdecay", b.rnd (60, 200)); b.env (0, 0, b.rndExp (150, 400), 0, 80);   // laser
+                b.fx (0, 0, fxDelay, 0.3f, 0.4f, 0.0f, 0.25f); break;
+        case 6: noise (0); b.env (0, 0, b.rndExp (900, 2000), 0, 600); b.filter (0, fLp24, b.rndExp (1500, 5000), 0.2f, -0.5f, 1, 900, 0, 500);   // explosion
+                b.L (1, "on", 1); chip (1); b.L (1, "coarse", -24); b.L (1, "penv", 12); b.L (1, "pdecay", 200); b.env (1, 0, 600, 0, 300); b.L (1, "level", 0.5f);
+                b.fx (0, 0, fxBite, 0.35f, 0.4f, 0.2f, 0.6f); break;
+        case 7: chip (0); b.L (0, "coarse", 24); b.env (0, 0, 60, 0, 30); pattern (b, 0, { 0, 12 }, r64, aeOneShot, 0.9f); break;   // menu select
+        case 8: chip (0); b.L (0, "coarse", 12); b.env (0, 0, 70, 0, 30); pattern (b, 0, { 7, 0 }, r64, aeOneShot, 0.9f); break;   // menu back
+        case 9: chip (0); b.L (0, "coarse", 12); b.env (0, 0, 160, 0, 80); pattern (b, 0, { 0, 12, 0, 12 }, r32, aeOneShot, 0.8f); break;   // pause
+        case 10: chip (0); b.env (0, 10, 1200, 0.8f, 500);   // teleport
+                 b.set ("lfo1_shape", lsSawUp); b.set ("lfo1_rate", b.rnd (6, 14)); b.mod (msLfo1, mdPitch, b.rnd (0.2f, 0.45f));
+                 b.L (0, "penv", -12); b.L (0, "pdecay", 600); b.fx (0, 0, fxPhaser, 0.6f, 0.7f, 0.6f, 0.6f); break;
+        case 11: chip (0); b.env (0, 2, 300, 0.8f, 200); pattern (b, 0, { 12, 7, 4, 0, -5, -12 }, r8, aeOneShot, 0.85f); break;   // game over
+        case 12: chip (0); b.env (0, 2, 200, 0.8f, 150); pattern (b, 0, { 0, 4, 7, 12, 7, 12, 16, 19, 24 }, r16, aeOneShot, 0.8f); break;   // stage clear
+        case 13: noise (0); b.env (0, 0, 500, 0, 200); b.filter (0, fLp12, 6000, 0.4f, -0.8f, 1, 400, 0, 200);   // fireball
+                 b.L (1, "on", 1); chip (1); b.L (1, "penv", 12); b.L (1, "pdecay", 150); b.env (1, 0, 250, 0, 100); b.L (1, "level", 0.5f); break;
+        case 14: noise (0); b.env (0, 5, 700, 0, 300); b.filter (0, fBp12, 1500, 0.6f, 0.4f, 1, 300, 0, 200);   // splash
+                 b.set ("lfo1_rate", 9); b.set ("lfo1_shape", lsSampleHold); b.mod (msLfo1, mdCutoff, 0.3f); break;
+        case 15: chip (0); b.env (0, 0, 500, 1, 100); b.set ("lfo1_shape", lsSquare); b.set ("lfo1_rate", b.rnd (3, 8)); b.mod (msLfo1, mdPitch, b.rnd (0.15f, 0.3f)); break;   // alarm
+        case 16: b.chipSource (0, { chips::polyCounter, chips::psg, chips::console8, chips::computerSid }); b.L (0, "coarse", -12);   // hover engine
+                 b.env (0, 80, 1000, 1, 300); b.set ("lfo1_rate", b.rnd (5, 12)); b.mod (msLfo1, mdPitch, 0.05f); b.mod (msLfo1, mdLevel, -0.3f); break;
+        case 17: chip (0); b.L (0, "coarse", 12); b.env (0, 0, 35, 0, 20); b.mod (msRandom, mdPitch, 0.25f); break;   // text blip: each note a random pitch
+        case 18: for (int l = 0; l < 2; ++l) { b.L (l, "on", 1); chip (l); b.L (l, "coarse", -12); b.L (l, "fine", l ? 30.0f : -30.0f); b.env (l, 30, 1200, 0, 400);   // boss roar
+                     b.L (l, "penv", 5); b.L (l, "pdecay", 900); }
+                 b.fx (0, 0, fxDrive, 0.6f, 0.5f, 0.4f, 0.8f); b.fx (0, 1, fxRingMod, 0.2f, 0.5f, 0.3f, 0.4f); break;
+        default: chip (0); b.L (0, "penv", -24); b.L (0, "pdecay", b.rnd (900, 1800)); b.env (0, 300, 2500, 1, 200);   // charge up
+                 b.set ("lfo1_rate", 14); b.mod (msLfo1, mdLevel, -0.4f); break;
+    }
+}
+
+void designArp (Builder& b, int v)
+{
+    const int prevCat = b.cat;
+    b.cat = b.pick (std::vector<int> { cLead, cPluck, cBells, cKeys });
+    b.source (0, 0.2f);
+    b.cat = prevCat;
+    b.env (0, 0, b.rndExp (100, 400), b.rnd (0, 0.5f), b.rndExp (60, 200));
+    switch (v % 6)
+    {
+        case 0: b.L (0, "arp", amArp); b.L (0, "arpdir", adUp); b.L (0, "arprate", (float) r64); b.L (0, "arpoct", 1); b.L (0, "arpgate", 1.0f); break;   // chord arp from held keys
+        case 1: b.L (0, "arp", amArp); b.L (0, "arpdir", adUp); b.L (0, "arprate", (float) r16); b.L (0, "arpoct", 2); break;
+        case 2: b.L (0, "arp", amArp); b.L (0, "arpdir", adUpDown); b.L (0, "arprate", (float) r16t); b.L (0, "arpoct", 2); break;
+        case 3: b.L (0, "arp", amArp); b.L (0, "arpdir", adRandom); b.L (0, "arprate", (float) r32); b.L (0, "arpoct", 3); break;
+        case 4: b.L (0, "arp", amArp); b.L (0, "arpdir", adConverge); b.L (0, "arprate", (float) r16); b.L (0, "arpoct", 2); b.L (0, "arpswing", 0.35f); break;
+        default:  // gallop
+            b.L (0, "arp", amArp); b.L (0, "arpdir", adUp); b.L (0, "arprate", (float) r16); b.L (0, "arpoct", 1); b.L (0, "arpsteps", 4);
+            b.p.steps.push_back ({ 0, "on", 1, 0.0f }); break;
+    }
+    if (v % 6 != 5) b.L (0, "arpsteps", (float) b.pick (std::vector<int> { 8, 16, 12 }));
+    b.L (0, "arpgate", v % 6 == 0 ? 1.0f : b.rnd (0.3f, 0.8f));
+    for (int s = 0; s < 16; ++s) if (s % 4 != 0) b.p.steps.push_back ({ 0, "vel", s, b.rnd (0.5f, 0.85f) });
+    b.fx (0, 0, b.pick (std::vector<int> { fxDelay, fxConsoleEcho }), b.rnd (0.4f, 0.7f), b.rnd (0.25f, 0.5f), b.rnd (0, 0.7f), b.rnd (0.2f, 0.4f));
 }
 
 void designBrass (Builder& b)
@@ -472,91 +679,6 @@ void designPerc (Builder& b, int kind)
     if (b.chance (0.3f)) b.fx (0, 1, fxConsoleEcho, b.rnd (0.1f, 0.4f), 0.3f, b.rnd (0, 1), 0.25f);
 }
 
-void designFx (Builder& b, int kind)
-{
-    switch (kind % 12)
-    {
-        case 0:   // laser
-            b.source (0, 0.0f); b.L (0, "penv", b.rnd (24, 48)); b.L (0, "pdecay", b.rnd (60, 250)); b.env (0, 0, b.rndExp (150, 450), 0, 100);
-            if (b.chance (0.5f)) b.fx (0, 0, fxDelay, 0.3f, 0.4f, 0.0f, 0.3f);
-            break;
-        case 1:   // riser: the pitch envelope starts low and rises back to the key over seconds
-            b.source (0, 0.0f); b.L (0, "penv", -b.rnd (18, 36)); b.L (0, "pdecay", b.rnd (900, 2500)); b.env (0, b.rnd (500, 2000), 4000, 1.0f, 300);
-            b.L (1, "on", 1); b.chipSource (1, { chips::psg, chips::console8, chips::handheld4, chips::computerSid, chips::polyCounter });
-            b.L (1, "wave", 3); b.env (1, 1500, 3000, 1, 300); b.filter (1, fLp12, 300, 0.4f, 0.8f, 2500, 3000, 1, 300); b.L (1, "level", 0.3f);
-            break;
-        case 2:   // drop
-            b.source (0, 0.0f); b.L (0, "penv", b.rnd (12, 30)); b.L (0, "pdecay", b.rnd (500, 1500)); b.env (0, 0, b.rndExp (800, 2000), 0, 300); break;
-        case 3:   // explosion
-            designDrum (b, 7); b.filter (0, fLp24, b.rndExp (1500, 5000), 0.2f, -0.4f, 1, 900, 0, 500); b.env (0, 0, b.rndExp (800, 2000), 0, 600);
-            b.L (1, "on", 1); b.chipSource (1, { chips::console8, chips::handheld4, chips::psg, chips::computerSid, chips::fm16 });
-            b.L (1, "coarse", -24); b.L (1, "penv", 12); b.L (1, "pdecay", 200); b.env (1, 0, 600, 0, 300); b.L (1, "level", 0.5f);
-            break;
-        case 4:   // coin: a one-shot two-note arp
-            b.chipSource (0, { chips::console8, chips::handheld4, chips::psg, chips::computerSid });
-            b.env (0, 0, 300, 0.6f, 200);
-            b.L (0, "arp", amArp); b.L (0, "arpdir", adUp); b.L (0, "arprate", 8); b.L (0, "arpoct", 2); b.L (0, "arpsteps", 2); b.L (0, "arpend", aeHold); b.L (0, "arpgate", 0.9f);
-            break;
-        case 5:   // power-up: fast one-shot run over octaves
-            b.chipSource (0, { chips::console8, chips::handheld4, chips::psg, chips::computerSid, chips::fm16 });
-            b.env (0, 0, 120, 0.5f, 80);
-            b.L (0, "arp", amSeq); b.L (0, "arprate", 8); b.L (0, "arpsteps", 8); b.L (0, "arpend", aeOneShot); b.L (0, "arpgate", 0.8f);
-            {
-                const int scale[] = { 0, 4, 7, 12, 16, 19, 24, 28 }, alt[] = { 0, 3, 7, 10, 12, 15, 19, 24 };
-                const bool minor = b.chance (0.5f);
-                for (int s = 0; s < 8; ++s) b.p.steps.push_back ({ 0, "note", s, (float) (minor ? alt[s] : scale[s]) });
-            }
-            break;
-        case 6:   // jump
-            b.chipSource (0, { chips::console8, chips::handheld4, chips::psg, chips::computerSid });
-            b.L (0, "penv", -b.rnd (5, 12)); b.L (0, "pdecay", b.rnd (60, 150)); b.env (0, 0, b.rndExp (150, 300), 0, 60); break;
-        case 7:   // zap
-            b.source (0, 0.0f); b.L (0, "penv", b.rnd (30, 48)); b.L (0, "pdecay", b.rnd (10, 40)); b.env (0, 0, b.rndExp (60, 200), 0, 40);
-            b.fx (0, 0, fxRingMod, b.rnd (0.3f, 0.7f), b.rnd (0, 1), 0.3f, 0.6f);
-            break;
-        case 8:   // alarm: square LFO on pitch
-            b.source (0, 0.0f); b.env (0, 0, 500, 1, 100);
-            b.set ("lfo1_shape", lsSquare); b.set ("lfo1_rate", b.rnd (2, 7)); b.mod (msLfo1, mdPitch, b.rnd (0.1f, 0.3f));
-            break;
-        case 9:   // UI blip
-            b.chipSource (0, { chips::console8, chips::handheld4, chips::psg, chips::computerSid, chips::fm16, chips::polyCounter });
-            b.L (0, "coarse", 12); b.env (0, 0, b.rndExp (40, 120), 0, 40); break;
-        case 10:  // warp: saw LFO on pitch through a delay
-            b.source (0, 0.0f); b.env (0, 20, 2000, 0.8f, 600);
-            b.set ("lfo1_shape", lsSawDown); b.set ("lfo1_rate", b.rnd (3, 9)); b.mod (msLfo1, mdPitch, b.rnd (0.15f, 0.4f));
-            b.fx (0, 0, fxDelay, 0.25f, 0.5f, 0.5f, 0.4f);
-            break;
-        default:  // impact
-            designDrum (b, 0); b.L (0, "penv", 48); b.L (0, "pdecay", 120); b.env (0, 0, 900, 0, 400);
-            b.fx (0, 0, fxReverb, 0.8f, 0.5f, 1.0f, 0.5f);
-            break;
-    }
-}
-
-void designArp (Builder& b)
-{
-    const int prevCat = b.cat;
-    b.cat = b.pick (std::vector<int> { cLead, cPluck, cBells, cKeys });
-    b.source (0, 0.25f);
-    b.cat = prevCat;
-    b.env (0, 0, b.rndExp (100, 500), b.rnd (0, 0.5f), b.rndExp (60, 250));
-    if (b.chance (0.5f)) b.filter (0, fLp12, b.rndExp (1200, 6000), b.rnd (0, 0.5f), b.rnd (0.1f, 0.5f), 1, 200, 0.2f, 100);
-    b.L (0, "arp", amArp);
-    b.L (0, "arpdir", (float) b.pick (std::vector<int> { adUp, adDown, adUpDown, adDownUp, adPlayed, adRandom, adConverge }));
-    b.L (0, "arprate", (float) b.pick (std::vector<int> { 7, 7, 6, 11, 8, 10 }));
-    b.L (0, "arpoct", (float) (1 + b.r.nextInt (3)));
-    const int steps = b.pick (std::vector<int> { 8, 16, 16, 12 });
-    b.L (0, "arpsteps", (float) steps);
-    b.L (0, "arpgate", b.rnd (0.25f, 0.8f)); b.L (0, "arpswing", b.chance (0.3f) ? b.rnd (0.1f, 0.4f) : 0.0f);
-    for (int s = 0; s < steps; ++s)
-    {
-        if (s % 4 != 0) b.p.steps.push_back ({ 0, "vel", s, b.rnd (0.45f, 0.85f) });
-        if (b.chance (0.12f)) b.p.steps.push_back ({ 0, "on", s, 0.0f });
-    }
-    b.fx (0, 0, b.pick (std::vector<int> { fxDelay, fxConsoleEcho }), b.rnd (0.4f, 0.7f), b.rnd (0.25f, 0.5f), b.rnd (0, 0.7f), b.rnd (0.2f, 0.4f));
-    if (b.chance (0.4f)) { b.L (1, "on", 1); b.source (1, 0.1f); b.L (1, "coarse", -12); b.L (1, "level", 0.4f); b.env (1, 20, 800, 0.6f, 400); }
-}
-
 void designSeq (Builder& b)
 {
     static const int scales[5][7] = { { 0, 3, 5, 7, 10, 12, 15 }, { 0, 2, 3, 5, 7, 8, 10 }, { 0, 2, 3, 5, 7, 9, 10 }, { 0, 2, 4, 5, 7, 9, 11 }, { 0, 1, 3, 5, 7, 8, 10 } };
@@ -600,7 +722,7 @@ const char* categoryName (int c)
 
 const char* presetTypeName (int t)
 {
-    static const char* n[] = { "ONE-SHOT", "PHRASE", "LOOP" };
+    static const char* n[] = { "ONE-SHOT", "SUSTAIN", "PHRASE", "LOOP" };
     return n[juce::jlimit (0, numPresetTypes - 1, t)];
 }
 
@@ -652,12 +774,13 @@ std::vector<PresetInfo> buildInfos()
         {
             const auto [cat, v] = slotOf (j);
             info.category = cat;
-            info.type = cat == cArp ? ptPhrase : (cat == cSeq ? ptLoop : ptShot);
+            const bool sustained = cat == cBass || cat == cLead || cat == cPad || cat == cBrass || cat == cStrings || cat == cOrgan || cat == cWinds || cat == cVoice;
+            info.type = cat == cArp ? ptPhrase : (cat == cSeq ? ptLoop : (sustained ? ptSustain : ptShot));
             info.root = rootOf[cat];
             if (cat == cDrums && v % 8 == 0) info.root = 36;
             info.previewSeconds = cat == cArp || cat == cSeq ? 4.0f : (cat == cPad || cat == cStrings || cat == cVoice ? 3.0f : 1.6f);
             const juce::String noun = cat == cDrums ? juce::String (nouns[cDrums][v % 8]) : cat == cPerc ? juce::String (nouns[cPerc][v % 12])
-                                    : cat == cFx ? juce::String (nouns[cFx][v % 12]) : juce::String (nouns[cat][(v * 5 + v / 25 + e * 7) % 12]);
+                                    : cat == cFx ? juce::String (fxNouns[v % 20]) : juce::String (nouns[cat][(v * 5 + v / 25 + e * 7) % 12]);
             int a = (v * 7 + cat * 3) % 25;
             juce::String name;
             for (int tries = 0; tries < 25; ++tries)
@@ -701,12 +824,12 @@ Patch buildPatch (int index)
     b.cat = cat;
     switch (cat)
     {
-        case cBass: designBass (b); break;
-        case cLead: designLead (b); break;
-        case cPad: designPad (b); break;
-        case cKeys: designKeys (b); break;
-        case cPluck: designPluck (b); break;
-        case cBells: designBells (b); break;
+        case cBass: designBass (b, v); break;
+        case cLead: designLead (b, v); break;
+        case cPad: designPad (b, v); break;
+        case cKeys: designKeys (b, v); break;
+        case cPluck: designPluck (b, v); break;
+        case cBells: designBells (b, v); break;
         case cBrass: designBrass (b); break;
         case cStrings: designStrings (b); break;
         case cOrgan: designOrgan (b); break;
@@ -715,7 +838,7 @@ Patch buildPatch (int index)
         case cDrums: designDrum (b, v % 8); break;
         case cPerc: designPerc (b, v); break;
         case cFx: designFx (b, v); break;
-        case cArp: designArp (b); break;
+        case cArp: designArp (b, v); break;
         default:
         {
             designSeq (b);

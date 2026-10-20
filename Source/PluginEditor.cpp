@@ -1279,9 +1279,35 @@ public:
 
     ~BrowsePage() override { list.setModel (nullptr); for (auto* c : { &eraBox, &typeBox }) c->setLookAndFeel (nullptr); }
 
-    void showEra (int e)   // opening the page follows the current era
+    void showEra (int eraIndex)   // opening the page: the current era, the current preset selected
     {
-        eraBox.setSelectedId (e + 2, sendNotificationSync);
+        eraBox.setSelectedId (eraIndex + 2, sendNotificationSync);
+        selectCurrent();
+        list.grabKeyboardFocus();
+    }
+
+    void followEra (int eraIndex)   // the era changed elsewhere (timeline): an era filter follows it
+    {
+        if (eraBox.getSelectedId() != 1 && eraBox.getSelectedId() != eraIndex + 2)
+        {
+            eraBox.setSelectedId (eraIndex + 2, sendNotificationSync);
+            selectCurrent();
+        }
+    }
+
+    void step (int d)   // arrow keys: next / previous sound in the list, played right away
+    {
+        if (results.empty()) return;
+        const int row = jlimit (0, (int) results.size() - 1, list.getSelectedRow() + d);
+        list.selectRow (row);
+    }
+
+    void selectCurrent()
+    {
+        const ScopedValueSetter<bool> svs (syncing, true);
+        auto it = std::find (results.begin(), results.end(), proc.getPreset());
+        if (it != results.end()) list.selectRow ((int) (it - results.begin()));
+        else list.deselectAllRows();
     }
 
     void resized() override
@@ -1334,7 +1360,7 @@ public:
         }
         g.setColour (ink().withAlpha (0.8f));
         g.setFont (fonts.body (e, 11.0f));
-        g.drawText (String (results.size()) + " sounds   -   click to load, double-click to play, star to keep",
+        g.drawText (String (results.size()) + " sounds   -   click or arrow keys to play, space to stop, star to keep",
                     list.getBounds().toFloat().withY ((float) list.getBottom() + 1).withHeight (16), Justification::centredLeft);
     }
 
@@ -1374,18 +1400,20 @@ private:
         g.drawText (presetTypeName (info.type), w - 88, 0, 82, h, Justification::centredLeft);
     }
 
+    // one click (or an arrow key) selects the sound: it loads and plays at once
+    void selectedRowsChanged (int row) override
+    {
+        if (syncing || row < 0 || row >= (int) results.size()) return;
+        proc.previewPreset (results[(size_t) row]);
+        list.repaint();
+    }
+
     void listBoxItemClicked (int row, const MouseEvent& ev) override
     {
         if (row < 0 || row >= (int) results.size()) return;
         const int p = results[(size_t) row];
         if (ev.x < 26) { Favourites::toggle (p); if (onlyFav) refilter(); list.repaint(); return; }
-        proc.setPreset (p);
-        list.repaint();
-    }
-
-    void listBoxItemDoubleClicked (int row, const MouseEvent&) override
-    {
-        if (row >= 0 && row < (int) results.size()) proc.previewPreset (results[(size_t) row]);
+        if (p == proc.getPreset() && proc.previewingPreset() < 0) proc.previewPreset (p);   // click again: play again
     }
 
     int countFor (int c) const
@@ -1413,6 +1441,7 @@ private:
             if (category < 0 || info.category == category) results.push_back (p);
         }
         list.updateContent();
+        selectCurrent();
         list.repaint();
         repaint();
     }
@@ -1425,7 +1454,7 @@ private:
     Rectangle<float> favBtn, catArea;
     std::vector<int> base, results;
     int category = -1;
-    bool onlyFav = false;
+    bool onlyFav = false, syncing = false;
 };
 
 //==============================================================================
@@ -1468,6 +1497,7 @@ public:
         pages[4] = std::make_unique<BrowsePage> (proc, fonts, knobLnf);
         for (auto& pg : pages) addChildComponent (*pg);
         lastPreset = proc.getPreset();
+        setWantsKeyboardFocus (true);
         showIntro = ! proc.introSeen();
         layout();
         updateTheme();
@@ -1520,6 +1550,7 @@ public:
     {
         dragStarted = false;
         downHit = hitTestArea (ev.position);
+        grabKeyboardFocus();   // space / arrow keys go to Bit Era while you work in it
     }
 
     void mouseDrag (const MouseEvent& ev) override
@@ -1549,8 +1580,8 @@ public:
                 break;
             case Hit::era:
                 proc.stopPreview();
-                playing = -1;
                 proc.setPreset (hit.index * presetsPerEra);
+                followEraInBrowser();
                 break;
             case Hit::prev: stepPreset (-1); break;
             case Hit::next: stepPreset (1); break;
@@ -1558,17 +1589,8 @@ public:
             case Hit::row:
             {
                 const int preset = rowPreset (hit.index);
-                if (playing == preset && hit.kind == Hit::rowPlay)
-                {
-                    proc.stopPreview();
-                    playing = -1;
-                }
-                else
-                {
-                    proc.previewPreset (preset);
-                    playing = preset;
-                    playEndMs = Time::getMillisecondCounterHiRes() + proc.getSoundLengthSeconds (preset) * 1000.0 + 150.0;
-                }
+                if (proc.previewingPreset() == preset && hit.kind == Hit::rowPlay) proc.stopPreview();
+                else proc.previewPreset (preset);
                 repaint();
                 break;
             }
@@ -1576,6 +1598,7 @@ public:
             case Hit::pageNext: stepPage (1); break;
             case Hit::tab:
                 if (hit.index == 6) if (auto* bp = dynamic_cast<BrowsePage*> (pages[4].get())) bp->showEra (currentEra());
+                grabKeyboardFocus();
                 page = hit.index;
                 updateTheme();
                 break;
@@ -1649,8 +1672,7 @@ private:
         g.drawFittedText (title, Rectangle<float> (332, 82, 230, 32).toNearestInt(), Justification::centredLeft, 1, 0.6f);
     }
     Hit downHit;
-    int playing = -1;
-    double playEndMs = 0;
+    int lastPreviewing = -1, lastEra = -1;
 
     int currentEra() const { return eraOfPreset (proc.getPreset()); }
     // the PLAY page lists the presets 6 at a time: the block of 6 that holds the current preset
@@ -1702,16 +1724,44 @@ private:
         for (auto& k : knobs)
             if (k.slider.isVisible() != (! showIntro && page == 0))
                 k.slider.setVisible (! showIntro && page == 0);
-        if (playing >= 0 && Time::getMillisecondCounterHiRes() > playEndMs)
-        {
-            playing = -1;
-            repaint();
-        }
+        if (proc.previewingPreset() != lastPreviewing) { lastPreviewing = proc.previewingPreset(); repaint(); }
+        if (currentEra() != lastEra) { lastEra = currentEra(); followEraInBrowser(); }
     }
 
+    void followEraInBrowser()
+    {
+        if (auto* bp = dynamic_cast<BrowsePage*> (pages[4].get())) bp->followEra (currentEra());
+    }
+
+    // next / previous preset: loads it and plays it right away
     void stepPreset (int d)
     {
-        proc.setPreset ((proc.getPreset() + d + numPresets) % numPresets);
+        proc.previewPreset ((proc.getPreset() + d + numPresets) % numPresets);
+    }
+
+    bool keyPressed (const KeyPress& key) override
+    {
+        if (showIntro) return false;
+        if (key == KeyPress::spaceKey)
+        {
+            if (proc.previewingPreset() >= 0) proc.stopPreview();
+            else proc.previewPreset (proc.getPreset());
+            return true;
+        }
+        if (page == 6)
+            if (auto* bp = dynamic_cast<BrowsePage*> (pages[4].get()))
+            {
+                if (key == KeyPress::downKey) { bp->step (1); return true; }
+                if (key == KeyPress::upKey) { bp->step (-1); return true; }
+            }
+        if (page == 0)
+        {
+            if (key == KeyPress::downKey || key == KeyPress::rightKey) { stepPreset (1); return true; }
+            if (key == KeyPress::upKey || key == KeyPress::leftKey) { stepPreset (-1); return true; }
+        }
+        if (key == KeyPress::pageDownKey) { proc.previewPreset ((currentEra() + 1) % numEras * presetsPerEra); return true; }
+        if (key == KeyPress::pageUpKey) { proc.previewPreset ((currentEra() + numEras - 1) % numEras * presetsPerEra); return true; }
+        return false;
     }
 
     Hit hitTestArea (Point<float> p) const
@@ -2075,7 +2125,7 @@ private:
         for (int i = 0; i < soundsPerEra; ++i)
         {
             const int p = rowPreset (i);
-            const bool sel = p == preset, on = p == playing;
+            const bool sel = p == preset, on = p == proc.previewingPreset();
             auto r = rows[i];
             auto shape = panelShape (t, r);
             if (t.frame == FrameStyle::retro) { shape.clear(); shape.addRoundedRectangle (r, r.getHeight() * 0.5f); }

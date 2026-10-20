@@ -102,6 +102,8 @@ public:
     void setBank (const chips::Bank* b) { bank = b; }
     void prepare (double sampleRate, int maxBlock);
     void reset();
+    // stop every note: hard = 3 ms fade (preset change), else a normal release
+    void allNotesOff (bool hard);
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const EngineParams& p);
     bool isSilent() const;
 
@@ -109,13 +111,14 @@ public:
     int currentStep (int layer) const { return layers[juce::jlimit (0, numLayers - 1, layer)].uiStep.load(); }
     float macroValue (int m) const { return m >= 0 && m < numMacros ? lastMacro[m] : 0.0f; }
 
-    static constexpr int voicesPerLayer = 16;
+    static constexpr int voicesPerLayer = 24;
 
 private:
     struct Env
     {
         enum Stage { idle, attack, decay, sustain, release } stage = idle;
         float level = 0.0f;
+        float cD = -1.0f, cR = -1.0f, kD = 0.0f, kR = 0.0f;   // cached decay / release coefficients
         void gate (bool on) { stage = on ? attack : (stage == idle ? idle : release); }
         float next (float a, float d, float s, float r, double sr);
     };
@@ -123,13 +126,15 @@ private:
     struct Filter
     {
         float ic1 = 0, ic2 = 0, z[4] {};
+        float lastFc = -1.0f, lastRes = -1.0f, g = 0.0f, k = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;   // cached coefficients
         void reset() { ic1 = ic2 = 0; for (auto& v : z) v = 0; }
         float process (float x, int type, float fc, float res, double sr);
     };
 
     struct Voice
     {
-        bool active = false, held = false, sustained = false, arpNote = false;
+        bool active = false, held = false, sustained = false, arpNote = false, kill = false;
+        float killGain = 1.0f, envSmooth = 0.0f;   // envSmooth: the chips' stepped volume, de-clicked
         int note = -1;
         float velocity = 0.0f, pitch = 60.0f, target = 60.0f, vel = 1.0f, panOffset = 0.0f, random = 0.0f;
         double t = 0.0, gateLeft = -1.0;   // arp notes: samples until their note-off

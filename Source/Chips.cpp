@@ -188,6 +188,8 @@ void Osc::start (int source, int wave, double hostRate, const Bank* bank)
     lfsr = 0x7fff; held = lp = lp2 = prevOut = hold = prevHold = 0.0f; step = 0; done = false;
     for (auto& p : opPh) p = 0.0;
     for (auto& o : opOut) o = 0.0f;
+    for (int i = 0; i < 4; ++i) { opDec[i] = 1.0f; opDecK[i] = 0.0f; }
+    cacheF = -1.0; cacheA = cacheB = 0.0;
     fb[0] = fb[1] = 0.0f;
     if (src == computerSid) lfsr = 0x7ffff8;
     if (isSampler (src) && (bk == nullptr || bk->empty())) done = true;
@@ -202,14 +204,20 @@ float Osc::pulseBlep (double inc, double width)
     return (float) v;
 }
 
-float Osc::noiseNes (double freq, bool shortMode)
+float Osc::noiseNes (double freq, bool shortMode, bool authentic)
 {
     static const int periods[16] = { 4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068 };
-    const double target = 1789773.0 / juce::jmax (1.0, freq * 64.0);
-    int best = 0;
-    for (int i = 1; i < 16; ++i)
-        if (std::abs (std::log ((double) periods[i] / target)) < std::abs (std::log ((double) periods[best] / target))) best = i;
-    clockAcc += (1789773.0 / periods[best]) / sr;
+    if (freq != cacheF)
+    {
+        cacheF = freq;
+        const double target = 1789773.0 / juce::jmax (1.0, freq * 64.0);
+        int best = 0;
+        for (int i = 1; i < 16; ++i)
+            if (std::abs (std::log ((double) periods[i] / target)) < std::abs (std::log ((double) periods[best] / target))) best = i;
+        cacheA = 1789773.0 / periods[best];   // the 16 hardware rates (authentic)
+        cacheB = juce::jmin (1789773.0 / 4.0, freq * 64.0);   // continuous (playable)
+    }
+    clockAcc += (authentic ? cacheA : cacheB) / sr;
     while (clockAcc >= 1.0)
     {
         clockAcc -= 1.0;
@@ -246,8 +254,9 @@ float Osc::next (double freq, float c)
             constexpr double clk = 1789773.0;
             if (wv <= 3 || wv == 7)
             {
-                const double p = juce::jlimit (8.0, 2047.0, std::round (clk / (16.0 * freq)) - 1.0);
-                const double fq = clk / (16.0 * (p + 1.0));
+                // 11-bit period of the chip; notes below its range keep their pitch (playable everywhere)
+                const double praw = std::round (clk / (16.0 * freq)) - 1.0;
+                const double fq = praw > 2047.0 ? freq : clk / (16.0 * (juce::jmax (8.0, praw) + 1.0));
                 static const double duty[4] = { 0.125, 0.25, 0.5, 0.75 };
                 double w = duty[juce::jmin (wv, 3)];
                 if (wv == 7)   // duty cycler: changes duty every few frames
@@ -259,15 +268,15 @@ float Osc::next (double freq, float c)
             }
             else if (wv == 4)
             {
-                const double p = juce::jlimit (0.0, 2047.0, std::round (clk / (32.0 * freq)) - 1.0);
-                const double fq = clk / (32.0 * (p + 1.0));
+                const double praw = std::round (clk / (32.0 * freq)) - 1.0;
+                const double fq = praw > 2047.0 ? freq : clk / (32.0 * (juce::jmax (0.0, praw) + 1.0));
                 ph = wrap (ph + fq / sr);
                 const int idx = (int) (ph * 32.0);
                 const int v = idx < 16 ? 15 - idx : idx - 16;
                 out = (float) (v / 7.5 - 1.0) * 0.55f;
             }
             else
-                out = noiseNes (freq, wv == 6) * 0.4f;
+                out = noiseNes (freq, wv == 6, c < 0.2f) * 0.4f;
             if (c > 0.0f && wv != 7) out = (float) (std::tanh (out * (1.0f + c * 3.0f)) / std::tanh (1.0f + c * 3.0f)) * 0.55f;   // mixer crunch
             break;
         }
@@ -275,15 +284,15 @@ float Osc::next (double freq, float c)
         {
             if (wv <= 3)
             {
-                const double x = juce::jlimit (0.0, 2047.0, std::round (2048.0 - 131072.0 / freq));
-                const double fq = 131072.0 / (2048.0 - x);
+                const double x = std::round (2048.0 - 131072.0 / freq);
+                const double fq = x < 0.0 ? freq : 131072.0 / (2048.0 - juce::jmin (2047.0, x));
                 static const double duty[4] = { 0.125, 0.25, 0.5, 0.75 };
                 out = pulseBlep (fq / sr, duty[wv]) * 0.5f;
             }
             else if (wv <= 11)
             {
-                const double x = juce::jlimit (0.0, 2047.0, std::round (2048.0 - 65536.0 / freq));
-                const double fq = 65536.0 / (2048.0 - x);
+                const double x = std::round (2048.0 - 65536.0 / freq);
+                const double fq = x < 0.0 ? freq : 65536.0 / (2048.0 - juce::jmin (2047.0, x));
                 ph = wrap (ph + fq / sr);
                 int v = waveRam().v[wv - 4][(int) (ph * 32.0) & 31];
                 const int shift = c < 0.4f ? 0 : (c < 0.8f ? 1 : 2);   // wave volume shift = coarser steps
@@ -292,9 +301,8 @@ float Osc::next (double freq, float c)
             }
             else
             {
-                const double desired = freq * 32.0;
-                const double rate = 262144.0 / std::pow (2.0, std::round (std::log2 (262144.0 / juce::jmax (1.0, desired))));
-                out = noiseLfsr15 (rate, wv == 13) * 0.4f;
+                if (freq != cacheF) { cacheF = freq; cacheA = juce::jmin (262144.0, freq * 32.0); }
+                out = noiseLfsr15 (cacheA, wv == 13) * 0.4f;
             }
             // the handheld's output capacitor (high-pass, gives the thin click)
             lp += (out - lp) * 0.0035f;
@@ -356,7 +364,7 @@ float Osc::next (double freq, float c)
         case psg:
         {
             constexpr double clk = 3579545.0;
-            auto quant = [clk] (double f) { const double n = juce::jlimit (1.0, 1023.0, std::round (clk / (32.0 * f))); return clk / (32.0 * n); };
+            auto quant = [clk] (double f) { const double n = juce::jlimit (1.0, 65535.0, std::round (clk / (32.0 * f))); return clk / (32.0 * n); };
             switch (wv)
             {
                 case 0: out = pulseBlep (quant (freq) / sr, 0.5) * 0.5f; break;
@@ -384,9 +392,7 @@ float Osc::next (double freq, float c)
                 }
                 case 4:
                 {
-                    static const double rates[3] = { clk / 512.0, clk / 1024.0, clk / 2048.0 };
-                    const int r = freq > 400 ? 0 : (freq > 150 ? 1 : 2);
-                    clockAcc += rates[r] / sr;
+                    clockAcc += quant (freq * 15.0 * 0.5) / sr;   // periodic noise one octave down: metallic, follows the key
                     while (clockAcc >= 1.0) { clockAcc -= 1.0; step = (step + 1) % 15; }
                     out = (step == 0 ? 1.0f : -0.07f) * 0.6f;
                     lp += (out - lp) * 0.01f; out -= lp;
@@ -419,8 +425,8 @@ float Osc::next (double freq, float c)
         {
             const auto& pat = polyPatterns().p[juce::jlimit (0, 6, wv)];
             const double L = (double) pat.size();
-            const bool pokey = c >= 0.5f;
-            const double base = pokey ? 64000.0 : 31400.0, maxN = pokey ? 255.0 : 31.0;
+            const bool tia = c < 0.2f;   // low character: the authentic 5-bit dividers (out of tune); else 16-bit dividers (in tune)
+            const double base = tia ? 31400.0 : 1789773.0, maxN = tia ? 31.0 : 65535.0;
             double stepsPerCycle = wv == 0 ? 2.0 : L;
             const double n = juce::jlimit (0.0, maxN, std::round (base / (freq * stepsPerCycle)) - 1.0);
             clockAcc += (base / (n + 1.0)) / sr;
@@ -438,8 +444,9 @@ float Osc::fmNext (double freq, float c)
 {
     const auto& p = fmPatches[juce::jlimit (0, numFm - 1, wv)];
     float env[4];
-    for (int i = 0; i < 4; ++i)
-        env[i] = p.sustain[i] + (1.0f - p.sustain[i]) * (float) std::exp (-t * p.decay[i]);
+    if (opDecK[0] <= 0.0f)
+        for (int i = 0; i < 4; ++i) { opDecK[i] = (float) std::exp (-p.decay[i] / sr); opDec[i] = 1.0f; }
+    for (int i = 0; i < 4; ++i) { env[i] = p.sustain[i] + (1.0f - p.sustain[i]) * opDec[i]; opDec[i] *= opDecK[i]; }
     const float idx = 0.3f + 1.4f * c;
     auto op = [&] (int i, double mod)
     {
@@ -473,11 +480,18 @@ float Osc::oplNext (double freq, float c)
 {
     const auto& p = oplPatches[juce::jlimit (0, numOpl - 1, wv)];
     // 10-bit F-number + block quantization
-    int block = 0;
-    while (block < 7 && freq * std::pow (2.0, 20 - block) / 49716.0 > 1023.0) ++block;
-    const double fnum = std::round (freq * std::pow (2.0, 20 - block) / 49716.0);
-    const double fq = fnum * 49716.0 / std::pow (2.0, 20 - block);
-    const float menv = p.modSustain + (1.0f - p.modSustain) * (float) std::exp (-t * p.modDecay);
+    if (freq != cacheF)
+    {
+        cacheF = freq;
+        int block = 0;
+        while (block < 7 && freq * std::pow (2.0, 20 - block) / 49716.0 > 1023.0) ++block;
+        const double fnum = std::round (freq * std::pow (2.0, 20 - block) / 49716.0);
+        cacheA = fnum * 49716.0 / std::pow (2.0, 20 - block);
+    }
+    const double fq = cacheA;
+    if (opDecK[0] <= 0.0f) { opDecK[0] = (float) std::exp (-p.modDecay / sr); opDec[0] = 1.0f; }
+    const float menv = p.modSustain + (1.0f - p.modSustain) * opDec[0];
+    opDec[0] *= opDecK[0];
     ph2 = wrap (ph2 + fq * p.modRatio / sr);
     const double fbm = p.feedback * 1.2 * (fb[0] + fb[1]) * 0.5;
     const float mo = (float) oplWave (p.modWave, wrap (ph2 + fbm / twoPi)) * menv;
@@ -512,7 +526,7 @@ float Osc::samplerNext (double freq, float c)
         case sampler8:   // 16.7 kHz 8-bit samples, period-quantized playback, no interpolation, fixed + LED filter
         {
             constexpr double paula = 3546895.0, base = 16726.0;
-            const double period = juce::jlimit (113.0, 65535.0, std::round (paula / (base * ratio)));
+            const double period = juce::jlimit (16.0, 65535.0, std::round (paula / (base * ratio)));   // below 113 = beyond the real chip, kept playable
             tickAcc += (paula / period) / sr;
             while (tickAcc >= 1.0)
             {

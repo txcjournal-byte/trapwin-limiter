@@ -63,6 +63,48 @@ int main()
         }
         prints.push_back (std::move (fp));
         printPreset.push_back (preset);
+
+        // melodic sounds must follow the keyboard: a fifth up has to sound higher
+        const int c = info.category;
+        if (c != bitera::cDrums && c != bitera::cPerc && c != bitera::cFx && c != bitera::cSeq)
+        {
+            // period of the sound by autocorrelation (lag of the best match), 0 when there is no clear pitch
+            auto pitchOf = [&] (int note)
+            {
+                proc.prepareToPlay (sr, block);
+                std::vector<float> x;
+                juce::AudioBuffer<float> buf (2, block);
+                for (int bl = 0; bl < (int) (0.3 * sr / block); ++bl)
+                {
+                    juce::MidiBuffer midi;
+                    if (bl == 0) midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), 0);
+                    buf.clear();
+                    proc.processBlock (buf, midi);
+                    if (bl >= 3) for (int i = 0; i < block; ++i) x.push_back (buf.getSample (0, i) + buf.getSample (1, i));
+                }
+                const int n = juce::jmin ((int) x.size() - 2400, 4096);
+                double best = 0; int bestLag = 0;
+                double e0 = 0; for (int i = 0; i < n; ++i) e0 += x[(size_t) i] * x[(size_t) i];
+                for (int lag = 24; lag < 2400; ++lag)
+                {
+                    double c = 0, e1 = 0;
+                    for (int i = 0; i < n; ++i) { c += x[(size_t) i] * x[(size_t) (i + lag)]; e1 += x[(size_t) (i + lag)] * x[(size_t) (i + lag)]; }
+                    c /= std::sqrt (e0 * e1 + 1e-12);
+                    if (c > best + 0.02) { best = c; bestLag = lag; }
+                }
+                return best > 0.6 ? (double) bestLag : 0.0;
+            };
+            const double lo = pitchOf (info.root), hi = pitchOf (info.root + 7);
+            const bool clear = lo > 0 && hi > 0;
+            const double ratio = clear ? lo / hi : 1.5;
+            // a fifth up = period / 1.5; octave errors of the estimate (x2 / x0.5) are fine too
+            const bool tracks = ! clear || std::abs (ratio - 1.5) < 0.12 || std::abs (ratio - 0.75) < 0.08 || std::abs (ratio - 3.0) < 0.25;
+            if (! tracks)   // the estimate is rough (chords, bells, echoes): reported, checked by ear / spectral scan
+            {
+                std::cout << "check pitch " << preset << " " << bitera::era (info.era).year << " " << bitera::categoryName (c) << " " << info.name
+                          << "  period " << lo << " -> " << hi << "\n";
+            }
+        }
     }
     int dups = 0;
     for (size_t a = 0; a < prints.size(); ++a)

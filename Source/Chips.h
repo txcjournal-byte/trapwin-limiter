@@ -60,7 +60,7 @@ private:
     float fmNext (double freq, float charAmt);
     float oplNext (double freq, float charAmt);
     float samplerNext (double freq, float charAmt);
-    float noiseNes (double freq, bool shortMode);
+    float noiseNes (double freq, bool shortMode, bool authentic);
     float noiseLfsr15 (double rateHz, bool sevenBit);
 
     int src = 0, wv = 0;
@@ -71,7 +71,9 @@ private:
     int step = 0;
     bool done = false;
 
+    double cacheF = -1.0, cacheA = 0.0, cacheB = 0.0;   // per-frequency cached values
     // FM state
+    float opDec[4] {}, opDecK[4] {};
     double opPh[4] {};
     float opOut[4] {}, fb[2] {};
 

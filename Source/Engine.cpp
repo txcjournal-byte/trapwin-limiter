@@ -34,12 +34,14 @@ float Engine::Env::next (float a, float d, float s, float r, double rate)
             if (level >= 1.0f) { level = 1.0f; stage = decay; }
             break;
         case decay:
-            level = s + (level - s) * (float) std::exp (-4.6 / (juce::jmax (0.001f, d) * rate));
+            if (d != cD) { cD = d; kD = (float) std::exp (-4.6 / (juce::jmax (0.001f, d) * rate)); }
+            level = s + (level - s) * kD;
             if (std::abs (level - s) < 1.0e-4f) { level = s; stage = sustain; }
             break;
         case sustain: level = s; break;
         case release:
-            level *= (float) std::exp (-6.9 / (juce::jmax (0.001f, r) * rate));
+            if (r != cR) { cR = r; kR = (float) std::exp (-6.9 / (juce::jmax (0.001f, r) * rate)); }
+            level *= kR;
             if (level < 1.0e-4f) { level = 0.0f; stage = idle; }
             break;
     }
@@ -53,16 +55,19 @@ float Engine::Filter::process (float x, int type, float fc, float res, double ra
     if (type == fLp24)
     {
         // 4-pole ladder with saturating feedback (the classic transistor-ladder character)
-        const float g = (float) (1.0 - std::exp (-twoPi * fc / rate));
-        const float k = res * 3.9f;
+        if (fc != lastFc || res != lastRes) { lastFc = fc; lastRes = res; g = (float) (1.0 - std::exp (-twoPi * fc / rate)); k = res * 3.9f; }
         float in = std::tanh (x - k * z[3]);
         for (auto& st : z) { st += g * (in - st); in = st; }
         return z[3] * (1.0f + k * 0.35f);
     }
     // zero-delay state variable filter
-    const float g = (float) std::tan (juce::MathConstants<double>::pi * fc / rate);
-    const float k = 2.0f - 1.95f * juce::jlimit (0.0f, 1.0f, res);
-    const float a1 = 1.0f / (1.0f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+    if (fc != lastFc || res != lastRes)
+    {
+        lastFc = fc; lastRes = res;
+        g = (float) std::tan (juce::MathConstants<double>::pi * fc / rate);
+        k = 2.0f - 1.95f * juce::jlimit (0.0f, 1.0f, res);
+        a1 = 1.0f / (1.0f + g * (g + k)); a2 = g * a1; a3 = g * a2;
+    }
     const float v3 = x - ic2, v1 = a1 * ic1 + a2 * v3, v2 = ic2 + a2 * ic1 + a3 * v3;
     ic1 = 2.0f * v1 - ic1; ic2 = 2.0f * v2 - ic2;
     switch (type)
@@ -101,14 +106,14 @@ const char* lfoShapeName (int s)
 
 const juce::StringArray& syncNames()
 {
-    static const juce::StringArray n { "FREE", "4 BARS", "2 BARS", "1 BAR", "1/2", "1/4", "1/8", "1/16", "1/32", "1/4 T", "1/8 T", "1/16 T" };
+    static const juce::StringArray n { "FREE", "4 BARS", "2 BARS", "1 BAR", "1/2", "1/4", "1/8", "1/16", "1/32", "1/4 T", "1/8 T", "1/16 T", "1/64", "1/128" };
     return n;
 }
 
 double syncBeats (int sync)
 {
-    static const double b[] = { 0.0, 16.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0 };
-    return b[juce::jlimit (0, 11, sync)];
+    static const double b[] = { 0.0, 16.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0, 0.0625, 0.03125 };
+    return b[juce::jlimit (0, 13, sync)];
 }
 
 const char* arpDirName (int d)
@@ -153,6 +158,23 @@ void Engine::reset()
     tone.reset(); reverb.reset();
 }
 
+void Engine::allNotesOff (bool hard)
+{
+    for (auto& l : layers)
+    {
+        l.held.clear(); l.arpHeld.clear();
+        l.arpRunning = false; l.arpFinished = false; l.step = -1; l.uiStep = -1;
+        for (auto& v : l.voices)
+            if (v.active)
+            {
+                v.held = false; v.sustained = false; v.gateLeft = -1.0;
+                v.amp.gate (false); v.flt.gate (false); for (auto& e : v.menv) e.gate (false);
+                if (hard) v.kill = true;
+            }
+    }
+    sustainPedal = false;
+}
+
 bool Engine::isSilent() const
 {
     for (auto& l : layers)
@@ -195,7 +217,7 @@ void Engine::modSums (const EngineParams& p, const float* src, int layer, bool v
 void Engine::startVoice (int li, Voice& v, int note, float vel, float fromPitch, const EngineParams& p, int stepIdx)
 {
     const auto& lp = p.layer[li];
-    v.note = note; v.velocity = vel; v.held = true; v.sustained = false;
+    v.note = note; v.velocity = vel; v.held = true; v.sustained = false; v.kill = false; v.killGain = 1.0f; v.envSmooth = 0.0f;
     v.target = (float) note;
     v.pitch = (lp.glide > 0.0005f && fromPitch >= 0.0f) ? fromPitch : (float) note;
     v.age = ++layers[li].counter; v.t = 0.0; v.gateLeft = -1.0;
@@ -470,15 +492,22 @@ void Engine::renderVoices (int li, int start, int num, const EngineParams& p)
             const float pitchMod = md[mdPitch] * 24.0f;
 
             float fc = lp.cutoff;
+            const float killK = (float) std::exp (-1.0 / (0.003 * sr));
+            const float smoothK = (float) (1.0 - std::exp (-1.0 / (0.0012 * sr)));
+            double semis = 60.0, freq = 440.0;
             for (int i = c0; i < c0 + cn; ++i)
             {
                 v.pitch += (v.target - v.pitch) * glideK;
-                const double t = v.t;
-                const float vibFade = (float) juce::jmin (1.0, t / 0.35);
-                const double semis = v.pitch + lp.coarse + lp.fine * 0.01f + bend * p.bendRange + pitchMod
-                                   + lp.pitchEnv * std::exp (-t / juce::jmax (0.001f, lp.pitchDecay))
-                                   + vib * 0.01f * vibFade * std::sin (twoPi * lp.vibRate * t);
-                float x = v.osc.next (mtof (semis), chr);
+                if (((i - c0) & 3) == 0)   // pitch at 1/4 of the sample rate (smooth enough, much cheaper)
+                {
+                    const double t = v.t;
+                    const float vibFade = (float) juce::jmin (1.0, t / 0.35);
+                    semis = v.pitch + lp.coarse + lp.fine * 0.01f + bend * p.bendRange + pitchMod
+                          + (lp.pitchEnv != 0.0f ? lp.pitchEnv * std::exp (-t / juce::jmax (0.001f, lp.pitchDecay)) : 0.0)
+                          + (vib > 0.0f ? vib * 0.01f * vibFade * std::sin (twoPi * lp.vibRate * t) : 0.0);
+                    freq = mtof (semis);
+                }
+                float x = v.osc.next (freq, chr);
                 const float fe = v.flt.next (lp.fa, lp.fd, lp.fs, lp.fr, sr);
                 if (lp.filter != fOff)
                 {
@@ -486,7 +515,9 @@ void Engine::renderVoices (int li, int start, int num, const EngineParams& p)
                         fc = lp.cutoff * cutMul * std::pow (2.0f, (fenv * fe * 96.0f + lp.keyTrack * ((float) semis - 60.0f)) / 12.0f);
                     x = v.filter.process (x, lp.filter, fc, reso, sr);
                 }
-                const float env = stepVolume (v.amp.next (lp.a, lp.d, lp.s, lp.r, sr), steps, logSteps);
+                float env = stepVolume (v.amp.next (lp.a, lp.d, lp.s, lp.r, sr), steps, logSteps);
+                if (steps > 0) { v.envSmooth += (env - v.envSmooth) * smoothK; env = v.envSmooth; }   // keep the steps, lose the clicks
+                if (v.kill) { v.killGain *= killK; env *= v.killGain; if (v.killGain < 1.0e-3f) { v.active = false; break; } }
                 const float y = x * env * level;
                 outL[i] += y * panL;
                 outR[i] += y * panR;
