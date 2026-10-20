@@ -127,6 +127,27 @@ class KnobLookAndFeel : public LookAndFeel_V4
 public:
     const Theme* theme = nullptr;
 
+    Font getComboBoxFont (ComboBox& box) override { return Font (FontOptions (jmin (13.5f, (float) box.getHeight() * 0.55f), Font::bold)); }
+    Font getPopupMenuFont() override { return Font (FontOptions (14.0f)); }
+    void positionComboBoxText (ComboBox& box, Label& label) override
+    {
+        label.setBounds (4, 1, box.getWidth() - 20, box.getHeight() - 2);
+        label.setFont (getComboBoxFont (box));
+    }
+    void drawComboBox (Graphics& g, int w, int h, bool, int, int, int, int, ComboBox& box) override
+    {
+        auto r = Rectangle<float> (0, 0, (float) w, (float) h);
+        g.setColour (box.findColour (ComboBox::backgroundColourId));
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (box.findColour (ComboBox::outlineColourId));
+        g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
+        Path arrow;
+        const float ax = (float) w - 11.0f, ay = (float) h * 0.5f;
+        arrow.addTriangle (ax - 4, ay - 2, ax + 4, ay - 2, ax, ay + 3);
+        g.setColour (box.findColour (ComboBox::arrowColourId));
+        g.fillPath (arrow);
+    }
+
     void drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos, float startA, float endA, Slider&) override
     {
         if (theme == nullptr) return;
@@ -548,6 +569,666 @@ private:
 };
 
 //==============================================================================
+// shared bits of the engine pages (MOD, FX, ARP, MACRO)
+class Page : public Component, private Timer
+{
+public:
+    Page (BitEraProcessor& p, const Fonts& f, KnobLookAndFeel& lnf) : proc (p), fonts (f), knobLnf (lnf) { startTimerHz (15); }
+    ~Page() override = default;
+
+    void setTheme (const Theme* th, int eraIndex)
+    {
+        theme = th; e = eraIndex;
+        for (auto* c : allCombos) styleCombo (*c);
+        repaint();
+    }
+
+protected:
+    struct Knob
+    {
+        ~Knob() { attachment.reset(); slider.setLookAndFeel (nullptr); }
+        Slider slider;
+        std::unique_ptr<AudioProcessorValueTreeState::SliderAttachment> attachment;
+        String id, label;
+        Rectangle<float> area;   // label above, value below
+    };
+
+    struct Combo
+    {
+        ~Combo() { attachment.reset(); box.setLookAndFeel (nullptr); }
+        ComboBox box;
+        std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> attachment;
+        String id;
+    };
+
+    Knob& addKnob (Knob& k, const String& label)
+    {
+        k.label = label;
+        k.slider.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
+        k.slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+        k.slider.setLookAndFeel (&knobLnf);
+        k.slider.setRotaryParameters (MathConstants<float>::pi * 1.25f, MathConstants<float>::pi * 2.75f, true);
+        k.slider.setPopupDisplayEnabled (true, true, this);
+        k.slider.onValueChange = [this] { repaint(); };
+        addAndMakeVisible (k.slider);
+        allKnobs.push_back (&k);
+        return k;
+    }
+
+    void attach (Knob& k, const String& id)
+    {
+        k.attachment.reset();
+        k.id = id;
+        if (proc.state.getParameter (id) != nullptr)
+            k.attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.state, id, k.slider);
+    }
+
+    void addCombo (Combo& c)
+    {
+        c.box.setJustificationType (Justification::centredLeft);
+        addAndMakeVisible (c.box);
+        allCombos.push_back (&c.box);
+        c.box.onChange = [this] { repaint(); };
+    }
+
+    void attach (Combo& c, const String& id)
+    {
+        c.attachment.reset();
+        c.id = id;
+        c.box.clear (dontSendNotification);
+        if (auto* p = dynamic_cast<AudioParameterChoice*> (proc.state.getParameter (id)))
+        {
+            c.box.addItemList (p->choices, 1);
+            c.attachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.state, id, c.box);
+        }
+    }
+
+    void styleCombo (ComboBox& c)
+    {
+        if (theme == nullptr) return;
+        const auto& t = *theme;
+        c.setColour (ComboBox::backgroundColourId, t.lcd);
+        c.setColour (ComboBox::textColourId, t.lcdInk);
+        c.setColour (ComboBox::outlineColourId, t.lcdInk.withAlpha (0.4f));
+        c.setColour (ComboBox::arrowColourId, t.lcdInk);
+        c.setLookAndFeel (&knobLnf);
+    }
+
+    float value (const String& id) const
+    {
+        auto* p = proc.state.getParameter (id);
+        return p != nullptr ? p->convertFrom0to1 (p->getValue()) : 0.0f;
+    }
+    void setValue (const String& id, float v)
+    {
+        if (auto* p = proc.state.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (v));
+    }
+
+    Colour ink() const { return panelLabel (e, *theme); }
+
+    void paintPanel (Graphics& g, Rectangle<float> r) const
+    {
+        const auto& t = *theme;
+        auto shape = panelShape (t, r);
+        g.setColour (panelFill (e, t));
+        if (e == 8) g.setGradientFill (ColourGradient (Colours::white, 0, r.getY(), Colour (0xffd6e4ea), 0, r.getBottom(), false));
+        g.fillPath (shape);
+        g.setColour (e == 0 ? t.ink : t.panelEdge);
+        g.strokePath (shape, PathStrokeType (e == 0 || e == 2 || e == 5 ? 2.0f : 1.0f));
+    }
+
+    void paintHeading (Graphics& g, const String& text, Rectangle<float> r) const
+    {
+        g.setColour (theme->accent == theme->ink ? ink() : theme->accent);
+        if (panelIsDark (e, *theme) && theme->accent.getPerceivedBrightness() < 0.25f) g.setColour (ink());
+        g.setFont (fonts.body (e, 13.0f));
+        g.drawText (text, r, Justification::centredLeft);
+    }
+
+    void paintKnob (Graphics& g, const Knob& k, const String& valueText, float alpha = 1.0f) const
+    {
+        const auto& t = *theme;
+        g.setColour (ink().withMultipliedAlpha (alpha));
+        g.setFont (fonts.body (e, 11.5f));
+        g.drawText (k.label, k.area.withHeight (16), Justification::centred);
+        auto vb = Rectangle<float> (k.area.getCentreX() - 38, k.area.getBottom() - 18, 76, 17);
+        g.setColour (t.lcd.withMultipliedAlpha (alpha));
+        g.fillRoundedRectangle (vb, 3.0f);
+        g.setColour (t.lcdInk.withMultipliedAlpha (alpha));
+        g.setFont (fonts.body (e, 11.5f));
+        g.drawText (valueText, vb, Justification::centred);
+    }
+
+    String paramText (const String& id) const
+    {
+        auto* p = proc.state.getParameter (id);
+        return p != nullptr ? p->getCurrentValueAsText() : String();
+    }
+
+    // knob inside an area: label 16 px on top, value 18 px at the bottom
+    static void placeKnob (Knob& k, Rectangle<float> area)
+    {
+        k.area = area;
+        const float size = jmin (area.getWidth() - 8.0f, area.getHeight() - 38.0f);
+        k.slider.setBounds (area.withTrimmedTop (17).withTrimmedBottom (20).withSizeKeepingCentre (size, size).toNearestInt());
+    }
+
+    void paintTabs (Graphics& g, Rectangle<float>* tabs, const StringArray& names, int selected) const
+    {
+        const auto& t = *theme;
+        for (int i = 0; i < names.size(); ++i)
+        {
+            const bool sel = i == selected;
+            g.setColour (sel ? t.accent : panelFill (e, t));
+            g.fillRoundedRectangle (tabs[i], jmin (t.corner, 6.0f));
+            g.setColour (sel ? t.accent : t.panelEdge);
+            g.drawRoundedRectangle (tabs[i], jmin (t.corner, 6.0f), 1.5f);
+            g.setColour (sel ? (t.accent.getPerceivedBrightness() > 0.6f ? Colours::black : Colours::white) : ink());
+            g.setFont (fonts.body (e, 14.0f));
+            g.drawText (names[i], tabs[i], Justification::centred);
+        }
+    }
+
+    void timerCallback() override { if (isShowing()) repaint(); }
+
+    BitEraProcessor& proc;
+    const Fonts& fonts;
+    KnobLookAndFeel& knobLnf;
+    const Theme* theme = nullptr;
+    int e = 0;
+    std::vector<Knob*> allKnobs;
+    std::vector<ComboBox*> allCombos;
+};
+
+//==============================================================================
+// MOD page: 3 LFOs, 2 mod envelopes and the 16-slot matrix
+class ModPage : public Page
+{
+public:
+    ModPage (BitEraProcessor& p, const Fonts& f, KnobLookAndFeel& lnf) : Page (p, f, lnf)
+    {
+        for (int k = 0; k < numLfos; ++k)
+        {
+            const String n = "lfo" + String (k + 1) + "_";
+            addCombo (lfoShape[k]); attach (lfoShape[k], n + "shape");
+            addCombo (lfoSync[k]); attach (lfoSync[k], n + "sync");
+            addCombo (lfoRetrig[k]); attach (lfoRetrig[k], n + "retrig");
+            addCombo (lfoUni[k]); attach (lfoUni[k], n + "uni");
+            addKnob (lfoRate[k], "RATE"); attach (lfoRate[k], n + "rate");
+            addKnob (lfoFade[k], "FADE IN"); attach (lfoFade[k], n + "fade");
+        }
+        static const char* envNames[4] = { "A", "D", "S", "R" };
+        static const char* envIds[4] = { "a", "d", "s", "r" };
+        for (int k = 0; k < numModEnvs; ++k)
+            for (int q = 0; q < 4; ++q) { addKnob (env[k][q], envNames[q]); attach (env[k][q], "menv" + String (k + 1) + "_" + envIds[q]); }
+        for (int s = 0; s < numModSlots; ++s)
+        {
+            const String n = "mod" + String (s + 1) + "_";
+            addCombo (slotSrc[s]); attach (slotSrc[s], n + "src");
+            addCombo (slotLayer[s]); attach (slotLayer[s], n + "layer");
+            addCombo (slotDst[s]); attach (slotDst[s], n + "dst");
+            slotAmt[s].setSliderStyle (Slider::LinearBar);
+            slotAmt[s].setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+            slotAmt[s].setPopupDisplayEnabled (true, true, this);
+            addAndMakeVisible (slotAmt[s]);
+            slotAmtAtt[s] = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.state, n + "amt", slotAmt[s]);
+        }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().toFloat();
+        auto top = b.removeFromTop (156);
+        const float pw = (top.getWidth() - 4 * 6.0f) / 5.0f;
+        for (int i = 0; i < 5; ++i) srcPanel[i] = { top.getX() + (float) i * (pw + 6.0f), top.getY(), pw, top.getHeight() };
+        for (int k = 0; k < numLfos; ++k)
+        {
+            auto r = srcPanel[k].reduced (6).withTrimmedTop (20);
+            auto row1 = r.removeFromTop (22);
+            lfoShape[k].box.setBounds (row1.removeFromLeft (row1.getWidth() * 0.58f).reduced (1).toNearestInt());
+            lfoSync[k].box.setBounds (row1.reduced (1).toNearestInt());
+            auto row2 = r.removeFromBottom (22);
+            lfoRetrig[k].box.setBounds (row2.removeFromLeft (row2.getWidth() * 0.5f).reduced (1).toNearestInt());
+            lfoUni[k].box.setBounds (row2.reduced (1).toNearestInt());
+            placeKnob (lfoRate[k], r.removeFromLeft (r.getWidth() * 0.5f));
+            placeKnob (lfoFade[k], r);
+        }
+        for (int k = 0; k < numModEnvs; ++k)
+        {
+            auto r = srcPanel[3 + k].reduced (4).withTrimmedTop (22);
+            const float w = r.getWidth() / 2.0f, h = r.getHeight() / 2.0f;
+            for (int q = 0; q < 4; ++q) placeKnob (env[k][q], { r.getX() + (q % 2) * w, r.getY() + (q / 2) * h, w, h });
+        }
+        auto m = b.withTrimmedTop (8);
+        matrix = m;
+        auto inner = m.reduced (8).withTrimmedTop (18);
+        const float colW = (inner.getWidth() - 12.0f) / 2.0f, rowH = inner.getHeight() / 8.0f;
+        for (int s = 0; s < numModSlots; ++s)
+        {
+            auto r = Rectangle<float> (inner.getX() + (s / 8) * (colW + 12.0f), inner.getY() + (s % 8) * rowH, colW, rowH).reduced (0, 1.5f);
+            slotRow[s] = r;
+            r.removeFromLeft (20);
+            slotSrc[s].box.setBounds (r.removeFromLeft (98).reduced (1, 0).toNearestInt());
+            slotLayer[s].box.setBounds (r.removeFromLeft (50).reduced (1, 0).toNearestInt());
+            slotDst[s].box.setBounds (r.removeFromLeft (124).reduced (1, 0).toNearestInt());
+            slotAmt[s].setBounds (r.reduced (2, 2).toNearestInt());
+        }
+    }
+
+    void paint (Graphics& g) override
+    {
+        if (theme == nullptr) return;
+        const auto& t = *theme;
+        static const char* titles[5] = { "LFO 1", "LFO 2", "LFO 3", "MOD ENV 1", "MOD ENV 2" };
+        for (int i = 0; i < 5; ++i)
+        {
+            paintPanel (g, srcPanel[i]);
+            paintHeading (g, titles[i], srcPanel[i].reduced (8, 4).withHeight (18));
+        }
+        for (int k = 0; k < numLfos; ++k) { paintKnob (g, lfoRate[k], paramText (lfoRate[k].id), value ("lfo" + String (k + 1) + "_sync") > 0.5f ? 0.4f : 1.0f); paintKnob (g, lfoFade[k], paramText (lfoFade[k].id)); }
+        for (auto& en : env) for (auto& q : en) paintKnob (g, q, paramText (q.id));
+
+        paintPanel (g, matrix);
+        paintHeading (g, "MOD MATRIX   SOURCE  >  LAYER  >  DESTINATION  =  AMOUNT", matrix.reduced (10, 4).withHeight (18));
+        for (int s = 0; s < numModSlots; ++s)
+        {
+            g.setColour (ink().withAlpha (0.8f));
+            g.setFont (fonts.body (e, 11.0f));
+            g.drawText (String (s + 1), slotRow[s].withWidth (18), Justification::centredRight);
+            slotAmt[s].setColour (Slider::trackColourId, t.accent.withAlpha (0.85f));
+            slotAmt[s].setColour (Slider::backgroundColourId, t.lcd);
+            const float amt = value ("mod" + String (s + 1) + "_amt");
+            g.setColour (t.lcdInk);
+            auto ab = slotAmt[s].getBounds().toFloat();
+            g.setFont (fonts.body (e, 11.0f));
+            ignoreUnused (ab, amt);
+        }
+    }
+
+    void paintOverChildren (Graphics& g) override
+    {
+        if (theme == nullptr) return;
+        for (int s = 0; s < numModSlots; ++s)
+        {
+            const float amt = value ("mod" + String (s + 1) + "_amt");
+            auto ab = slotAmt[s].getBounds().toFloat();
+            g.setColour (theme->accent.getPerceivedBrightness() > 0.6f && std::abs (amt) > 0.4f ? Colours::black : theme->lcdInk);
+            g.setFont (fonts.body (e, 11.0f));
+            g.drawText ((amt > 0 ? "+" : "") + String (roundToInt (amt * 100.0f)) + "%", ab, Justification::centred);
+        }
+    }
+
+private:
+    Combo lfoShape[numLfos], lfoSync[numLfos], lfoRetrig[numLfos], lfoUni[numLfos];
+    Knob lfoRate[numLfos], lfoFade[numLfos], env[numModEnvs][4];
+    Combo slotSrc[numModSlots], slotLayer[numModSlots], slotDst[numModSlots];
+    Slider slotAmt[numModSlots];
+    std::unique_ptr<AudioProcessorValueTreeState::SliderAttachment> slotAmtAtt[numModSlots];
+    Rectangle<float> srcPanel[5], matrix, slotRow[numModSlots];
+};
+
+//==============================================================================
+// FX page: 3 slots per layer (A, B, C) and 4 master slots
+class FxPage : public Page
+{
+public:
+    FxPage (BitEraProcessor& p, const Fonts& f, KnobLookAndFeel& lnf) : Page (p, f, lnf)
+    {
+        for (int s = 0; s < 4; ++s)
+        {
+            addCombo (type[s]);
+            for (int q = 0; q < 4; ++q) addKnob (knob[s][q], q == 3 ? "MIX" : "-");
+        }
+        select (4);
+    }
+
+    void select (int target)   // 0..3 = layer, 4 = master
+    {
+        sel = jlimit (0, 4, target);
+        const int slots = sel == 4 ? masterFxSlots : layerFxSlots;
+        for (int s = 0; s < 4; ++s)
+        {
+            const bool used = s < slots;
+            type[s].box.setVisible (used);
+            for (auto& k : knob[s]) k.slider.setVisible (used);
+            if (! used) continue;
+            const int layer = sel == 4 ? -1 : sel;
+            attach (type[s], BitEraProcessor::fxId (layer, s, "type"));
+            static const char* ids[4] = { "p1", "p2", "p3", "mix" };
+            for (int q = 0; q < 4; ++q) attach (knob[s][q], BitEraProcessor::fxId (layer, s, ids[q]));
+        }
+        resized();
+        repaint();
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().toFloat();
+        auto top = b.removeFromTop (40);
+        for (int i = 0; i < 5; ++i) tabs[i] = { top.getX() + (float) i * 92.0f, top.getY() + 2, 86, 32 };
+        const int slots = sel == 4 ? masterFxSlots : layerFxSlots;
+        const float rh = b.getHeight() / (float) slots;
+        for (int s = 0; s < slots; ++s)
+        {
+            auto r = Rectangle<float> (b.getX(), b.getY() + s * rh, b.getWidth(), rh).reduced (0, 3);
+            rows[s] = r;
+            auto inner = r.reduced (10, 6);
+            auto left = inner.removeFromLeft (230);
+            type[s].box.setBounds (left.withTrimmedTop (22).withHeight (30).toNearestInt());
+            const float kw = inner.getWidth() / 4.0f;
+            for (int q = 0; q < 4; ++q) placeKnob (knob[s][q], { inner.getX() + q * kw, inner.getY() - 2, kw, inner.getHeight() + 4 });
+        }
+    }
+
+    void paint (Graphics& g) override
+    {
+        if (theme == nullptr) return;
+        static const StringArray names { "L1", "L2", "L3", "L4", "MASTER" };
+        paintTabs (g, tabs, names, sel);
+        const int slots = sel == 4 ? masterFxSlots : layerFxSlots;
+        const int layer = sel == 4 ? -1 : sel;
+        for (int s = 0; s < slots; ++s)
+        {
+            paintPanel (g, rows[s]);
+            const String slotName = sel == 4 ? "MASTER " + String (s + 1) : "FX " + String::charToString ((juce_wchar) ('A' + s));
+            paintHeading (g, slotName, rows[s].reduced (12, 6).withHeight (18));
+            const int ft = roundToInt (value (BitEraProcessor::fxId (layer, s, "type")));
+            const float alpha = ft == fxOff ? 0.35f : 1.0f;
+            for (int q = 0; q < 3; ++q)
+            {
+                knob[s][q].label = ft == fxOff ? String ("-") : String (fxParamName (ft, q));
+                paintKnob (g, knob[s][q], fxParamText (ft, q, value (knob[s][q].id)), alpha);
+            }
+            paintKnob (g, knob[s][3], paramText (knob[s][3].id), alpha);
+        }
+        if (sel == 4)
+        {
+            g.setColour (ink().withAlpha (0.7f));
+            g.setFont (fonts.body (e, 11.0f));
+            g.drawText ("Signal: layers > layer FX > MASTER 1-4 > TONE > SPACE > VOLUME", getLocalBounds().toFloat().withTrimmedLeft (470).withHeight (40), Justification::centredLeft);
+        }
+    }
+
+    void mouseUp (const MouseEvent& ev) override
+    {
+        for (int i = 0; i < 5; ++i) if (tabs[i].contains (ev.position)) { select (i); return; }
+    }
+
+private:
+    int sel = 4;
+    Combo type[4];
+    Knob knob[4][4];
+    Rectangle<float> tabs[5], rows[4];
+};
+
+//==============================================================================
+// ARP page: per layer arpeggiator / step sequencer with step lanes
+class ArpPage : public Page
+{
+public:
+    ArpPage (BitEraProcessor& p, const Fonts& f, KnobLookAndFeel& lnf) : Page (p, f, lnf)
+    {
+        for (auto* c : { &mode, &dir, &rate, &end }) addCombo (*c);
+        addKnob (oct, "OCTAVES"); addKnob (steps, "STEPS"); addKnob (gate, "GATE"); addKnob (swing, "SWING");
+        select (0);
+    }
+
+    void select (int l)
+    {
+        layer = jlimit (0, numLayers - 1, l);
+        attach (mode, BitEraProcessor::layerId (layer, "arp"));
+        attach (dir, BitEraProcessor::layerId (layer, "arpdir"));
+        attach (rate, BitEraProcessor::layerId (layer, "arprate"));
+        attach (end, BitEraProcessor::layerId (layer, "arpend"));
+        attach (oct, BitEraProcessor::layerId (layer, "arpoct"));
+        attach (steps, BitEraProcessor::layerId (layer, "arpsteps"));
+        attach (gate, BitEraProcessor::layerId (layer, "arpgate"));
+        attach (swing, BitEraProcessor::layerId (layer, "arpswing"));
+        repaint();
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().toFloat();
+        auto top = b.removeFromTop (40);
+        for (int i = 0; i < numLayers; ++i) tabs[i] = { top.getX() + (float) i * 58.0f, top.getY() + 2, 52, 32 };
+        auto ctl = top.withTrimmedLeft (4 * 58.0f + 8);
+        const float cw = ctl.getWidth() / 4.0f;
+        mode.box.setBounds (Rectangle<float> (ctl.getX(), ctl.getY() + 4, cw - 6, 28).toNearestInt());
+        dir.box.setBounds (Rectangle<float> (ctl.getX() + cw, ctl.getY() + 4, cw - 6, 28).toNearestInt());
+        rate.box.setBounds (Rectangle<float> (ctl.getX() + cw * 2, ctl.getY() + 4, cw - 6, 28).toNearestInt());
+        end.box.setBounds (Rectangle<float> (ctl.getX() + cw * 3, ctl.getY() + 4, cw - 6, 28).toNearestInt());
+        auto knobsRow = b.removeFromTop (72).reduced (0, 3);
+        knobPanel = knobsRow;
+        const float kw = knobsRow.getWidth() / 4.0f;
+        Knob* ks[4] = { &oct, &steps, &gate, &swing };
+        for (int i = 0; i < 4; ++i) placeKnob (*ks[i], { knobsRow.getX() + i * kw, knobsRow.getY() + 2, kw, knobsRow.getHeight() - 4 });
+        grid = b.withTrimmedTop (4);
+        auto lanesArea = grid.reduced (8, 8).withTrimmedLeft (64);
+        static const float h[numLanes] = { 16, 44, 34, 44, 26, 20 };
+        float y = lanesArea.getY();
+        for (int i = 0; i < numLanes; ++i) { lane[i] = { lanesArea.getX(), y, lanesArea.getWidth(), h[i] }; y += h[i] + 5; }
+    }
+
+    void paint (Graphics& g) override
+    {
+        if (theme == nullptr) return;
+        const auto& t = *theme;
+        static const StringArray names { "L1", "L2", "L3", "L4" };
+        paintTabs (g, tabs, names, layer);
+        paintPanel (g, knobPanel);
+        paintKnob (g, oct, paramText (oct.id)); paintKnob (g, steps, paramText (steps.id));
+        paintKnob (g, gate, paramText (gate.id)); paintKnob (g, swing, paramText (swing.id));
+        paintPanel (g, grid);
+
+        const bool seq = roundToInt (value (BitEraProcessor::layerId (layer, "arp"))) == amSeq;
+        const bool off = roundToInt (value (BitEraProcessor::layerId (layer, "arp"))) == amOff;
+        const int n = roundToInt (value (BitEraProcessor::layerId (layer, "arpsteps")));
+        const int cur = proc.currentStep (layer);
+        static const char* laneNames[numLanes] = { "ON", "VELOCITY", "GATE", "NOTE", "PAN", "WAVE" };
+        const float sw = lane[0].getWidth() / (float) maxSteps;
+        for (int li = 0; li < numLanes; ++li)
+        {
+            auto r = lane[li];
+            g.setColour (ink().withAlpha (li == 3 && ! seq ? 0.35f : 0.9f));
+            g.setFont (fonts.body (e, 11.0f));
+            g.drawText (laneNames[li], r.withX (r.getX() - 64).withWidth (60), Justification::centredRight);
+            for (int s = 0; s < maxSteps; ++s)
+            {
+                auto c = Rectangle<float> (r.getX() + s * sw, r.getY(), sw, r.getHeight()).reduced (1.0f, 0);
+                const bool active = s < n;
+                const float a = (active ? 1.0f : 0.25f) * (off ? 0.5f : 1.0f);
+                g.setColour (t.lcd.withMultipliedAlpha (a));
+                g.fillRect (c);
+                if (s == cur && active) { g.setColour (t.accent.withAlpha (0.35f)); g.fillRect (c); }
+                g.setColour (t.accent.withMultipliedAlpha (a));
+                const float v = lanes (li, s);
+                switch (li)
+                {
+                    case 0: if (v > 0.5f) g.fillRect (c.reduced (2)); break;
+                    case 1: case 2: g.fillRect (c.withTrimmedTop (c.getHeight() * (1.0f - v))); break;
+                    case 3: case 4:
+                    {
+                        const float norm = li == 3 ? v / 24.0f : v;   // -1..1
+                        auto mid = c.getCentreY();
+                        if (norm >= 0) g.fillRect (c.withTop (mid - norm * c.getHeight() * 0.5f).withBottom (mid));
+                        else g.fillRect (c.withTop (mid).withBottom (mid - norm * c.getHeight() * 0.5f));
+                        g.setColour (t.lcdInk.withAlpha (0.3f * a)); g.drawHorizontalLine ((int) mid, c.getX(), c.getRight());
+                        if (li == 3 && std::abs (v) > 0.5f && sw > 18) { g.setColour (t.lcdInk.withMultipliedAlpha (a)); g.setFont (fonts.body (e, 9.0f)); g.drawText (String (roundToInt (v)), c, Justification::centredTop); }
+                        break;
+                    }
+                    default:
+                    {
+                        g.setColour (t.lcdInk.withMultipliedAlpha (a));
+                        g.setFont (fonts.body (e, 9.5f));
+                        g.drawText (v < 0 ? String ("-") : String (roundToInt (v) + 1), c, Justification::centred);
+                        break;
+                    }
+                }
+            }
+        }
+        g.setColour (ink().withAlpha (0.7f));
+        g.setFont (fonts.body (e, 10.5f));
+        g.drawText (seq ? "SEQ: every held key plays the step pattern, NOTE = semitones from the key"
+                        : "ARP: held keys in the chosen direction. Drag in the lanes to draw. WAVE: click to cycle the layer's waves (- = layer wave)",
+                    grid.reduced (10, 4).withTop (grid.getBottom() - 20), Justification::centredLeft);
+    }
+
+    void mouseDown (const MouseEvent& ev) override { edit (ev.position, true); }
+    void mouseDrag (const MouseEvent& ev) override { edit (ev.position, false); }
+    void mouseUp (const MouseEvent& ev) override
+    {
+        for (int i = 0; i < numLayers; ++i) if (tabs[i].contains (ev.position)) { select (i); return; }
+    }
+
+private:
+    static constexpr int numLanes = 6;
+    float lanes (int li, int s) const
+    {
+        switch (li)
+        {
+            case 0: return proc.getStep (layer, "on", s);
+            case 1: return proc.getStep (layer, "vel", s);
+            case 2: return proc.getStep (layer, "gate", s);
+            case 3: return proc.getStep (layer, "note", s);
+            case 4: return proc.getStep (layer, "pan", s);
+            default: return proc.getStep (layer, "wave", s);
+        }
+    }
+
+    void edit (Point<float> p, bool down)
+    {
+        for (int li = 0; li < numLanes; ++li)
+        {
+            auto r = lane[li];
+            if (! r.expanded (0, 3).contains (p) && ! (dragLane == li && ! down)) continue;
+            if (down) dragLane = li;
+            if (li != dragLane) continue;
+            const int s = jlimit (0, maxSteps - 1, (int) ((p.x - r.getX()) / (r.getWidth() / maxSteps)));
+            const float y = jlimit (0.0f, 1.0f, 1.0f - (p.y - r.getY()) / r.getHeight());
+            switch (li)
+            {
+                case 0: if (down) { drawOn = proc.getStep (layer, "on", s) < 0.5f; } proc.setStep (layer, "on", s, drawOn ? 1.0f : 0.0f); break;
+                case 1: proc.setStep (layer, "vel", s, jmax (0.05f, y)); break;
+                case 2: proc.setStep (layer, "gate", s, jmax (0.05f, y)); break;
+                case 3: proc.setStep (layer, "note", s, (float) roundToInt ((y * 2.0f - 1.0f) * 24.0f)); break;
+                case 4: proc.setStep (layer, "pan", s, y * 2.0f - 1.0f); break;
+                default:
+                    if (down)
+                    {
+                        const int src = roundToInt (value (BitEraProcessor::layerId (layer, "src")));
+                        const int w = roundToInt (proc.getStep (layer, "wave", s)) + 1;
+                        proc.setStep (layer, "wave", s, w >= chips::numWaves (src) ? -1.0f : (float) w);
+                    }
+                    break;
+            }
+            repaint();
+            return;
+        }
+    }
+
+    int layer = 0, dragLane = -1;
+    bool drawOn = true;
+    Combo mode, dir, rate, end;
+    Knob oct, steps, gate, swing;
+    Rectangle<float> tabs[numLayers], knobPanel, grid, lane[numLanes];
+};
+
+//==============================================================================
+// MACRO page: 8 macros and 2 XY pads, with what each one is routed to
+class MacroPage : public Page
+{
+public:
+    MacroPage (BitEraProcessor& p, const Fonts& f, KnobLookAndFeel& lnf) : Page (p, f, lnf)
+    {
+        for (int m = 0; m < numMacros; ++m) { addKnob (macro[m], "MACRO " + String (m + 1)); attach (macro[m], "macro" + String (m + 1)); }
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().toFloat();
+        auto left = b.removeFromLeft (b.getWidth() * 0.56f);
+        knobArea = left;
+        auto inner = left.reduced (8);
+        const float w = inner.getWidth() / 4.0f, h = inner.getHeight() / 2.0f;
+        for (int m = 0; m < numMacros; ++m)
+            placeKnob (macro[m], Rectangle<float> (inner.getX() + (m % 4) * w, inner.getY() + (m / 4) * h, w, h * 0.72f));
+        auto right = b.withTrimmedLeft (8);
+        const float padSize = jmin (right.getWidth() / 2.0f - 6.0f, right.getHeight() - 60.0f);
+        for (int k = 0; k < 2; ++k) pad[k] = { right.getX() + k * (padSize + 12.0f), right.getY() + 26, padSize, padSize };
+        padPanel = right;
+    }
+
+    void paint (Graphics& g) override
+    {
+        if (theme == nullptr) return;
+        const auto& t = *theme;
+        paintPanel (g, knobArea);
+        for (int m = 0; m < numMacros; ++m)
+        {
+            paintKnob (g, macro[m], paramText (macro[m].id));
+            g.setColour (ink().withAlpha (0.75f));
+            g.setFont (fonts.body (e, 10.0f, false));
+            g.drawFittedText (routes (msMacro1 + m), macro[m].area.withY (macro[m].area.getBottom() + 2).withHeight (40).toNearestInt(), Justification::centredTop, 3);
+        }
+        paintPanel (g, padPanel);
+        for (int k = 0; k < 2; ++k)
+        {
+            paintHeading (g, "XY " + String (k + 1), pad[k].withY (padPanel.getY() + 4).withHeight (18));
+            g.setColour (t.lcd);
+            g.fillRoundedRectangle (pad[k], 6.0f);
+            g.setColour (t.lcdInk.withAlpha (0.2f));
+            for (int i = 1; i < 4; ++i)
+            {
+                g.drawVerticalLine ((int) (pad[k].getX() + pad[k].getWidth() * i / 4), pad[k].getY(), pad[k].getBottom());
+                g.drawHorizontalLine ((int) (pad[k].getY() + pad[k].getHeight() * i / 4), pad[k].getX(), pad[k].getRight());
+            }
+            const float x = value ("xy" + String (k + 1) + "x"), y = value ("xy" + String (k + 1) + "y");
+            auto c = Point<float> (pad[k].getX() + x * pad[k].getWidth(), pad[k].getBottom() - y * pad[k].getHeight());
+            g.setColour (t.accent);
+            g.fillEllipse (Rectangle<float> (18, 18).withCentre (c));
+            g.setColour (t.lcdInk);
+            g.drawEllipse (Rectangle<float> (18, 18).withCentre (c), 1.5f);
+            g.setColour (ink().withAlpha (0.75f));
+            g.setFont (fonts.body (e, 10.0f, false));
+            g.drawFittedText ("X: " + routes (msXY1X + 2 * k) + "\nY: " + routes (msXY1Y + 2 * k),
+                              pad[k].withY (pad[k].getBottom() + 4).withHeight (padPanel.getBottom() - pad[k].getBottom() - 6).toNearestInt(), Justification::topLeft, 4);
+        }
+    }
+
+    void mouseDown (const MouseEvent& ev) override { drag (ev.position); }
+    void mouseDrag (const MouseEvent& ev) override { drag (ev.position); }
+
+private:
+    String routes (int src) const
+    {
+        StringArray out;
+        for (int s = 0; s < numModSlots; ++s)
+        {
+            const String n = "mod" + String (s + 1) + "_";
+            if (roundToInt (value (n + "src")) != src || std::abs (value (n + "amt")) < 0.001f) continue;
+            const int d = roundToInt (value (n + "dst")), l = roundToInt (value (n + "layer"));
+            out.add (String (modDestName (d)) + (d < mdVolume ? (l == 0 ? "" : " L" + String (l)) : ""));
+        }
+        return out.isEmpty() ? String ("not routed (MOD page)") : out.joinIntoString (", ");
+    }
+
+    void drag (Point<float> p)
+    {
+        for (int k = 0; k < 2; ++k)
+            if (pad[k].expanded (6).contains (p))
+            {
+                setValue ("xy" + String (k + 1) + "x", jlimit (0.0f, 1.0f, (p.x - pad[k].getX()) / pad[k].getWidth()));
+                setValue ("xy" + String (k + 1) + "y", jlimit (0.0f, 1.0f, (pad[k].getBottom() - p.y) / pad[k].getHeight()));
+                repaint();
+            }
+    }
+
+    Knob macro[numMacros];
+    Rectangle<float> knobArea, padPanel, pad[2];
+};
+
+//==============================================================================
 class Content : public Component, private Timer
 {
 public:
@@ -580,6 +1261,11 @@ public:
 
         layerPage = std::make_unique<LayerPage> (proc, fonts, knobLnf);
         addChildComponent (*layerPage);
+        pages[0] = std::make_unique<ModPage> (proc, fonts, knobLnf);
+        pages[1] = std::make_unique<FxPage> (proc, fonts, knobLnf);
+        pages[2] = std::make_unique<ArpPage> (proc, fonts, knobLnf);
+        pages[3] = std::make_unique<MacroPage> (proc, fonts, knobLnf);
+        for (auto& pg : pages) addChildComponent (*pg);
         lastPreset = proc.getPreset();
         showIntro = ! proc.introSeen();
         layout();
@@ -726,16 +1412,17 @@ private:
     Rectangle<float> startBtn { 430, 446, 240, 60 };
 
     bool showIntro = false, dragStarted = false;
-    static constexpr int numPages = 2;
+    static constexpr int numPages = 6;
+    std::unique_ptr<Page> pages[4];
     int page = 0, lastPreset = -1;
     std::unique_ptr<LayerPage> layerPage;
     Rectangle<float> pageArea { 332, 120, 748, 388 };
 
-    Rectangle<float> tabArea (int i) const { return { 868.0f + (float) i * 108.0f, 84.0f, 102.0f, 28.0f }; }
+    Rectangle<float> tabArea (int i) const { return { 582.0f + (float) i * 83.0f, 84.0f, 80.0f, 28.0f }; }
 
     void paintTabs (Graphics& g, int e, const Theme& t)
     {
-        static const char* names[numPages] = { "PLAY", "LAYERS" };
+        static const char* names[numPages] = { "PLAY", "LAYERS", "MOD", "FX", "ARP", "MACRO" };
         for (int i = 0; i < numPages; ++i)
         {
             auto r = tabArea (i);
@@ -766,6 +1453,7 @@ private:
     void layout()
     {
         layerPage->setBounds (pageArea.toNearestInt());
+        for (auto& pg : pages) pg->setBounds (pageArea.toNearestInt());
         for (int i = 0; i < soundsPerEra; ++i)
             rows[i] = { 332.0f + (float) (i / 3) * 326.0f, 232.0f + (float) (i % 3) * 52.0f, 314.0f, 46.0f };   // left: one-shots, right: phrases / loops / FX
         const float kw = (knobPanel.getWidth() - 28.0f) / 6.0f;
@@ -781,6 +1469,11 @@ private:
             k.slider.setVisible (! showIntro && page == 0);
         layerPage->setTheme (&era (currentEra()).theme, currentEra());
         layerPage->setVisible (! showIntro && page == 1);
+        for (int i = 0; i < 4; ++i)
+        {
+            pages[i]->setTheme (&era (currentEra()).theme, currentEra());
+            pages[i]->setVisible (! showIntro && page == i + 2);
+        }
         repaint();
     }
 

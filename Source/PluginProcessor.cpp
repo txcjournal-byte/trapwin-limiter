@@ -90,7 +90,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout BitEraProcessor::createLayou
         auto id = [i] (const char* n) { return ParameterID { layerId (i, n), 1 }; };
         const String L = "L" + String (i + 1) + " ";
         auto group = std::make_unique<AudioProcessorParameterGroup> ("layer" + String (i + 1), "Layer " + String (i + 1), "|");
-        group->addChild (std::make_unique<AudioParameterBool> (id ("on"), L + "On", i == 0));
+        group->addChild (std::make_unique<AudioParameterChoice> (id ("on"), L + "On", StringArray { "OFF", "ON" }, i == 0 ? 1 : 0));
         group->addChild (std::make_unique<AudioParameterChoice> (id ("src"), L + "Source", sources, 0));
         group->addChild (std::make_unique<AudioParameterInt> (id ("wave"), L + "Wave", 0, 127, 0));
         group->addChild (std::make_unique<AudioParameterFloat> (id ("level"), L + "Level", NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.8f, fAttr (pctText)));
@@ -171,9 +171,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout BitEraProcessor::createLayou
             group->addChild (std::make_unique<AudioParameterFloat> (ParameterID { n + "rate", 1 }, N + "Rate", rr, 2.0f,
                 fAttr ([] (float v, int) { return String (v, v < 1.0f ? 2 : 1) + " Hz"; })));
             group->addChild (std::make_unique<AudioParameterChoice> (ParameterID { n + "sync", 1 }, N + "Sync", bitera::syncNames(), 0));
-            group->addChild (std::make_unique<AudioParameterBool> (ParameterID { n + "retrig", 1 }, N + "Retrigger", true));
+            group->addChild (std::make_unique<AudioParameterChoice> (ParameterID { n + "retrig", 1 }, N + "Retrigger", StringArray { "FREE", "RETRIG" }, 1));
             group->addChild (std::make_unique<AudioParameterFloat> (ParameterID { n + "fade", 1 }, N + "Fade In", timeRange (0.0f, 5000.0f, 500.0f), 0.0f, fAttr (msText)));
-            group->addChild (std::make_unique<AudioParameterBool> (ParameterID { n + "uni", 1 }, N + "Unipolar", false));
+            group->addChild (std::make_unique<AudioParameterChoice> (ParameterID { n + "uni", 1 }, N + "Polarity", StringArray { "BI", "UNI" }, 0));
         }
         for (int k = 0; k < bitera::numModEnvs; ++k)
         {

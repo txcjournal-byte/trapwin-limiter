@@ -352,7 +352,8 @@ void Engine::arpStep (int li, const EngineParams& p)
     for (auto& n : notes)
     {
         const int note = juce::jlimit (0, 127, n.first);
-        const float vel = juce::jlimit (0.01f, 1.0f, n.second * lp.stepVel[next]);
+        const float chordScale = notes.size() > 1 ? 1.0f / std::sqrt ((float) notes.size()) : 1.0f;
+        const float vel = juce::jlimit (0.01f, 1.0f, n.second * lp.stepVel[next] * chordScale);
         noteOn (li, note, vel, p, true, next);
         // schedule the note-off by the gate of this step
         for (auto& v : L.voices)

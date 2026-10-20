@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # BIT ERA by TrapWin - its own project, built from this folder: cmake -S bitera -B build-bitera
 # Version lives here only (CI reads it from this line for the installers).
-project(BIT_ERA VERSION 0.2.0 LANGUAGES C CXX)
+project(BIT_ERA VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

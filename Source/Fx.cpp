@@ -281,8 +281,8 @@ void Fx::process (float* L, float* R, int num, const FxParams& fp, double bpm, f
         case fxReverb:
         {
             juce::dsp::Reverb::Parameters rp;
-            rp.roomSize = 0.3f + 0.69f * p0; rp.damping = p1; rp.width = p2;
-            rp.wetLevel = mix * 0.6f; rp.dryLevel = 1.0f - mix * 0.3f;
+            rp.roomSize = 0.3f + 0.6f * p0; rp.damping = p1; rp.width = p2;
+            rp.wetLevel = mix * 0.3f; rp.dryLevel = 1.0f - mix * 0.4f;
             reverb.setParameters (rp);
             if (R != L) { float* ch[2] = { L, R }; juce::dsp::AudioBlock<float> blk (ch, 2, (size_t) num); reverb.process (juce::dsp::ProcessContextReplacing<float> (blk)); }
             else { float* ch[1] = { L }; juce::dsp::AudioBlock<float> blk (ch, 1, (size_t) num); reverb.process (juce::dsp::ProcessContextReplacing<float> (blk)); }
@@ -332,7 +332,7 @@ void Fx::process (float* L, float* R, int num, const FxParams& fp, double bpm, f
             const float thr = -40.0f + p0 * 40.0f, ratio = 1.0f + p1 * 19.0f;
             const float att = (float) std::exp (-1.0 / ((0.0005 + 0.03 * (1.0 - p2)) * sr));
             const float rel = (float) std::exp (-1.0 / ((0.05 + 0.45 * (1.0 - p2)) * sr));
-            const float makeup = juce::Decibels::decibelsToGain (-thr * (1.0f - 1.0f / ratio) * 0.5f);
+            const float makeup = juce::Decibels::decibelsToGain (-thr * (1.0f - 1.0f / ratio) * 0.3f);
             for (int i = 0; i < num; ++i)
             {
                 const float lvl = juce::jmax (std::abs (L[i]), std::abs (R[i]));
