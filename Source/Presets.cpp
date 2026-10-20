@@ -373,7 +373,9 @@ void designPad (Builder& b, int v)
     }
     switch (kind)
     {
-        case 0: chordPattern (b, 0, r64); b.fx (0, 0, fxConsoleEcho, 0.3f, 0.45f, 0.5f, 0.35f); break;   // chord-arp pad
+        case 0:   // chord-arp pad: every arp step is a new note, so the notes start at once and ring out long
+            chordPattern (b, 0, r64); b.env (0, 3, 1500, 0.8f, b.rndExp (800, 2500));
+            b.fx (0, 0, fxConsoleEcho, 0.3f, 0.45f, 0.5f, 0.35f); break;
         case 1: b.set ("lfo2_rate", b.rnd (0.15f, 0.8f)); b.mod (msLfo1 + 1, mdChar, 0.45f); break;   // PWM pad
         case 2: for (int l = 0; l < 2; ++l) b.L (l, "vibdepth", b.rnd (6, 14)); b.fx (0, 0, fxChorus, 0.25f, 0.6f, 0.6f, 0.5f); break;
         case 3: b.L (1, "coarse", 12); b.fx (0, 0, fxReverb, 0.8f, 0.3f, 1.0f, 0.5f); break;   // shimmer octave
