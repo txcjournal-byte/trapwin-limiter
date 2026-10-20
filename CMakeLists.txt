@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # BIT ERA by TrapWin - its own project, built from this folder: cmake -S bitera -B build-bitera
 # Version lives here only (CI reads it from this line for the installers).
-project(BIT_ERA VERSION 0.3.0 LANGUAGES C CXX)
+project(BIT_ERA VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -51,7 +51,8 @@ target_sources(BitEra PRIVATE
     Source/Eras.cpp
     Source/Chips.cpp
     Source/Engine.cpp
-    Source/Fx.cpp)
+    Source/Fx.cpp
+    Source/Presets.cpp)
 
 target_compile_definitions(BitEra PUBLIC
     JUCE_WEB_BROWSER=0
@@ -79,7 +80,7 @@ target_link_libraries(BitEra
 option(BE_BUILD_TESTS "Build the Bit Era render test" ON)
 if(BE_BUILD_TESTS)
     juce_add_console_app(BitEraTests PRODUCT_NAME "BitEraTests")
-    target_sources(BitEraTests PRIVATE tests/RenderTest.cpp Source/PluginProcessor.cpp Source/Eras.cpp Source/Chips.cpp Source/Engine.cpp Source/Fx.cpp)
+    target_sources(BitEraTests PRIVATE tests/RenderTest.cpp Source/PluginProcessor.cpp Source/Eras.cpp Source/Chips.cpp Source/Engine.cpp Source/Fx.cpp Source/Presets.cpp)
     target_compile_definitions(BitEraTests PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BE_HEADLESS=1 BE_VERSION_STRING="${PROJECT_VERSION}"
         JucePlugin_Name="Bit Era" JucePlugin_IsSynth=1 JucePlugin_WantsMidiInput=1 JucePlugin_ProducesMidiOutput=0
@@ -92,7 +93,7 @@ if(BE_BUILD_TESTS)
 
     # UI snapshot tool: renders the window of every era to PNG (no window opened) - for design checks
     juce_add_console_app(BitEraSnapshot PRODUCT_NAME "BitEraSnapshot")
-    target_sources(BitEraSnapshot PRIVATE tests/Snapshot.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/Eras.cpp Source/Chips.cpp Source/Engine.cpp Source/Fx.cpp)
+    target_sources(BitEraSnapshot PRIVATE tests/Snapshot.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/Eras.cpp Source/Chips.cpp Source/Engine.cpp Source/Fx.cpp Source/Presets.cpp)
     target_compile_definitions(BitEraSnapshot PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BE_VERSION_STRING="${PROJECT_VERSION}"
         JucePlugin_Name="Bit Era" JucePlugin_IsSynth=1 JucePlugin_WantsMidiInput=1 JucePlugin_ProducesMidiOutput=0

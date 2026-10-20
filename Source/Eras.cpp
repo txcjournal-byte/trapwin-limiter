@@ -85,10 +85,10 @@ const Era eras[numEras] = {
 } // namespace
 
 const Era& era (int index) { return eras[juce::jlimit (0, numEras - 1, index)]; }
-int eraOfPreset (int preset) { return juce::jlimit (0, numPresets - 1, preset) / soundsPerEra; }
+int eraOfSound (int i) { return juce::jlimit (0, numSounds - 1, i) / soundsPerEra; }
 const SoundInfo& sound (int preset)
 {
-    preset = juce::jlimit (0, numPresets - 1, preset);
-    return eras[preset / soundsPerEra].sounds[preset % soundsPerEra];
+    const int i = juce::jlimit (0, numSounds - 1, preset);
+    return eras[i / soundsPerEra].sounds[i % soundsPerEra];
 }
 } // namespace bitera

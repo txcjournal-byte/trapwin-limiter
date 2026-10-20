@@ -649,5 +649,16 @@ void Engine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& 
     if (space > 0.001f) reverb.process (ctx);
     gain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-60.0f, 12.0f, p.volumeDb + mm[mdVolume] * 24.0f)));
     gain.applyGain (buffer, n);
+
+    // output safety: transparent below -3 dBFS, soft knee above, never past -0.2 dBFS
+    for (int c = 0; c < buffer.getNumChannels(); ++c)
+    {
+        auto* d = buffer.getWritePointer (c);
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = std::abs (d[i]);
+            if (a > 0.7f) d[i] = std::copysign (0.7f + 0.28f * std::tanh ((a - 0.7f) / 0.28f), d[i]);
+        }
+    }
 }
 } // namespace bitera

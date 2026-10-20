@@ -45,9 +45,9 @@ struct Era
 
 constexpr int numEras = 12;
 constexpr int soundsPerEra = 6;
-constexpr int numPresets = numEras * soundsPerEra;
+constexpr int numSounds = numEras * soundsPerEra;   // the built-in era sample bank
 
 const Era& era (int index);
-int eraOfPreset (int preset);
-const SoundInfo& sound (int preset);
+int eraOfSound (int soundIndex);
+const SoundInfo& sound (int soundIndex);
 } // namespace bitera

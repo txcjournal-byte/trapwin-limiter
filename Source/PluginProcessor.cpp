@@ -6,7 +6,7 @@
 
 namespace
 {
-constexpr int defaultPreset = (bitera::numEras - 1) * bitera::soundsPerEra;   // NOW era, first one-shot
+constexpr int defaultPreset = (bitera::numEras - 1) * bitera::presetsPerEra;   // NOW era, first sound
 
 const char* findResource (const char* originalName, int& size)
 {
@@ -230,8 +230,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout BitEraProcessor::createLayou
 void BitEraProcessor::loadBank()
 {
     juce::WavAudioFormat wav;
-    bank.resize ((size_t) bitera::numPresets);
-    for (int i = 0; i < bitera::numPresets; ++i)
+    bank.resize ((size_t) bitera::numSounds);
+    for (int i = 0; i < bitera::numSounds; ++i)
     {
         auto& s = bank[(size_t) i];
         s.name = bitera::sound (i).name;
@@ -337,9 +337,10 @@ void BitEraProcessor::setPreset (int preset)
         auto steps = stepsTree (i);
         steps.removeAllProperties (nullptr);
     }
-    // era preset: layer 1 plays the era sound
-    setParam (layerId (0, "on"), 1.0f);
-    setParam (layerId (0, "wave"), (float) preset);
+    // the preset itself
+    const auto patch = bitera::buildPatch (preset);
+    for (auto& pr : patch.params) setParam (pr.first, pr.second);
+    for (auto& st : patch.steps) stepsTree (st.layer).setProperty (juce::String (st.field) + juce::String (st.step), st.value, nullptr);
     pushSteps();
 }
 
@@ -379,13 +380,15 @@ void BitEraProcessor::pushSteps()
 
 int BitEraProcessor::previewNote (int preset) const
 {
-    return bitera::sound (juce::jlimit (0, bitera::numPresets - 1, preset)).root;
+    return bitera::presetInfo (preset).root;
 }
 
 bool BitEraProcessor::getSoundWav (int preset, juce::MemoryBlock& out) const
 {
     int size = 0;
-    auto* data = findResource (bitera::sound (juce::jlimit (0, bitera::numPresets - 1, preset)).resource, size);
+    preset = juce::jlimit (0, bitera::numPresets - 1, preset);
+    if (preset % bitera::presetsPerEra >= bitera::soundsPerEra) return false;   // designed presets: rendered, not stored
+    auto* data = findResource (bitera::sound (bitera::eraOfPreset (preset) * bitera::soundsPerEra + preset % bitera::presetsPerEra).resource, size);
     if (data == nullptr) return false;
     out.replaceAll (data, (size_t) size);
     return true;
@@ -401,13 +404,16 @@ void BitEraProcessor::stopPreview() { previewStop = 1; }
 
 double BitEraProcessor::getSoundLengthSeconds (int preset) const
 {
-    const auto& s = bank[(size_t) juce::jlimit (0, bitera::numPresets - 1, preset)];
+    preset = juce::jlimit (0, bitera::numPresets - 1, preset);
+    const auto& info = bitera::presetInfo (preset);
+    if (info.previewSeconds > 0.0f) return info.previewSeconds;
+    const auto& s = bank[(size_t) (bitera::eraOfPreset (preset) * bitera::soundsPerEra + preset % bitera::presetsPerEra)];
     return s.data.empty() ? 1.0 : (double) s.data.size() / s.sampleRate;
 }
 
 const juce::String BitEraProcessor::getProgramName (int index)
 {
-    return juce::String (bitera::era (bitera::eraOfPreset (index)).year) + " " + bitera::sound (index).name;
+    return juce::String (bitera::era (bitera::eraOfPreset (index)).year) + " " + bitera::presetInfo (index).name;
 }
 
 bool BitEraProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -462,8 +468,7 @@ bool BitEraProcessor::renderCurrentWav (juce::MemoryBlock& out)
     bitera::EngineParams p;
     readParams (p);
     const int note = previewNote (getPreset());
-    const bool sampleLayer = p.layer[0].on && bitera::chips::isSampler (p.layer[0].source);
-    const double holdSec = sampleLayer ? juce::jmin (12.0, getSoundLengthSeconds (getPreset()) + 0.05) : 1.5;
+    const double holdSec = juce::jlimit (0.3, 12.0, getSoundLengthSeconds (getPreset()) + 0.05);
     const int holdSamples = (int) (holdSec * rate), maxSamples = (int) ((holdSec + 8.0) * rate);
 
     juce::AudioBuffer<float> result (2, maxSamples);

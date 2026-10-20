@@ -4,6 +4,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include "Eras.h"
 #include "Engine.h"
+#include "Presets.h"
 
 // BIT ERA: 4-layer chip / sampler engine (see Engine.h), the era sample bank and the presets.
 // Parameter ids: l1_..l4_ per layer (incl. arp and l1_fx1_..), lfo1_.., menv1_.., mod1_.., macro1.., xy1x.., mfx1_..,

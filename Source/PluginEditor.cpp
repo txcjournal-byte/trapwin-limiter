@@ -1229,6 +1229,206 @@ private:
 };
 
 //==============================================================================
+// favourites, shared by every instance (user settings file)
+struct Favourites
+{
+    static PropertiesFile& file()
+    {
+        static PropertiesFile f ([] { PropertiesFile::Options o; o.applicationName = "Bit Era"; o.filenameSuffix = ".settings";
+                                      o.folderName = "TrapWin/Bit Era"; o.osxLibrarySubFolder = "Application Support"; return o; }());
+        return f;
+    }
+    static bool is (int preset) { return file().getValue ("favourites").contains ("," + String (preset) + ","); }
+    static void toggle (int preset)
+    {
+        String v = file().getValue ("favourites", ",");
+        const String key = "," + String (preset) + ",";
+        v = v.contains (key) ? v.replace (key, ",") : v + String (preset) + ",";
+        file().setValue ("favourites", v);
+        file().saveIfNeeded();
+    }
+};
+
+//==============================================================================
+// BROWSE page: search the 7,200 presets by name, era, category, type and favourites
+class BrowsePage : public Page, private ListBoxModel
+{
+public:
+    BrowsePage (BitEraProcessor& p, const Fonts& f, KnobLookAndFeel& lnf) : Page (p, f, lnf)
+    {
+        search.setTextToShowWhenEmpty ("Search 7,200 sounds...", Colours::grey);
+        search.onTextChange = [this] { refilter(); };
+        addAndMakeVisible (search);
+        eraBox.addItem ("ALL ERAS", 1);
+        for (int i = 0; i < numEras; ++i) eraBox.addItem (String (era (i).year) + "  " + era (i).shortName, i + 2);
+        typeBox.addItem ("ALL TYPES", 1);
+        for (int t = 0; t < numPresetTypes; ++t) typeBox.addItem (presetTypeName (t), t + 2);
+        for (auto* c : { &eraBox, &typeBox })
+        {
+            c->setSelectedId (1, dontSendNotification);
+            c->onChange = [this] { refilter(); };
+            c->setJustificationType (Justification::centredLeft);
+            addAndMakeVisible (*c);
+            allCombos.push_back (c);
+        }
+        list.setModel (this);
+        list.setRowHeight (24);
+        addAndMakeVisible (list);
+        refilter();
+    }
+
+    ~BrowsePage() override { list.setModel (nullptr); for (auto* c : { &eraBox, &typeBox }) c->setLookAndFeel (nullptr); }
+
+    void showEra (int e)   // opening the page follows the current era
+    {
+        eraBox.setSelectedId (e + 2, sendNotificationSync);
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().toFloat();
+        auto top = b.removeFromTop (36);
+        search.setBounds (top.removeFromLeft (250).reduced (0, 3).toNearestInt());
+        top.removeFromLeft (8);
+        eraBox.setBounds (top.removeFromLeft (170).reduced (0, 3).toNearestInt());
+        top.removeFromLeft (8);
+        typeBox.setBounds (top.removeFromLeft (130).reduced (0, 3).toNearestInt());
+        top.removeFromLeft (8);
+        favBtn = top.removeFromLeft (top.getWidth()).reduced (0, 3);
+        b.removeFromTop (6);
+        catArea = b.removeFromLeft (150);
+        b.removeFromLeft (8);
+        list.setBounds (b.withTrimmedBottom (18).toNearestInt());
+    }
+
+    void paint (Graphics& g) override
+    {
+        if (theme == nullptr) return;
+        const auto& t = *theme;
+        search.setColour (TextEditor::backgroundColourId, t.lcd);
+        search.setColour (TextEditor::textColourId, t.lcdInk);
+        search.setColour (TextEditor::outlineColourId, t.lcdInk.withAlpha (0.4f));
+        search.setColour (TextEditor::focusedOutlineColourId, t.accent);
+        search.setColour (CaretComponent::caretColourId, t.lcdInk);
+        list.setColour (ListBox::backgroundColourId, panelFill (e, t));
+        list.getVerticalScrollBar().setColour (ScrollBar::thumbColourId, t.accent.withAlpha (0.7f));
+
+        g.setColour (onlyFav ? t.accent : panelFill (e, t));
+        g.fillRoundedRectangle (favBtn, 4.0f);
+        g.setColour (onlyFav ? (t.accent.getPerceivedBrightness() > 0.6f ? Colours::black : Colours::white) : ink());
+        g.setFont (fonts.body (e, 13.0f));
+        g.drawText (String::fromUTF8 ("\xe2\x98\x85 FAVOURITES"), favBtn, Justification::centred);
+
+        paintPanel (g, catArea);
+        const float rh = (catArea.getHeight() - 8.0f) / (float) (numCategories + 1);
+        for (int c = -1; c < numCategories; ++c)
+        {
+            auto r = Rectangle<float> (catArea.getX() + 4, catArea.getY() + 4 + (c + 1) * rh, catArea.getWidth() - 8, rh);
+            const bool sel = c == category;
+            if (sel) { g.setColour (t.accent); g.fillRoundedRectangle (r.reduced (0, 1), 3.0f); }
+            g.setColour (sel ? (t.accent.getPerceivedBrightness() > 0.6f ? Colours::black : Colours::white) : ink());
+            g.setFont (fonts.body (e, 12.0f));
+            g.drawText (c < 0 ? String ("ALL") : String (categoryName (c)), r.withTrimmedLeft (8), Justification::centredLeft);
+            g.setFont (fonts.body (e, 10.5f, false));
+            g.drawText (String (countFor (c)), r.withTrimmedRight (8), Justification::centredRight);
+        }
+        g.setColour (ink().withAlpha (0.8f));
+        g.setFont (fonts.body (e, 11.0f));
+        g.drawText (String (results.size()) + " sounds   -   click to load, double-click to play, star to keep",
+                    list.getBounds().toFloat().withY ((float) list.getBottom() + 1).withHeight (16), Justification::centredLeft);
+    }
+
+    void mouseUp (const MouseEvent& ev) override
+    {
+        if (favBtn.contains (ev.position)) { onlyFav = ! onlyFav; refilter(); return; }
+        if (catArea.contains (ev.position))
+        {
+            const float rh = (catArea.getHeight() - 8.0f) / (float) (numCategories + 1);
+            category = jlimit (-1, numCategories - 1, (int) ((ev.position.y - catArea.getY() - 4) / rh) - 1);
+            refilter();
+        }
+    }
+
+private:
+    int getNumRows() override { return (int) results.size(); }
+
+    void paintListBoxItem (int row, Graphics& g, int w, int h, bool selected) override
+    {
+        if (theme == nullptr || row < 0 || row >= (int) results.size()) return;
+        const auto& t = *theme;
+        const int p = results[(size_t) row];
+        const auto& info = presetInfo (p);
+        const bool current = p == proc.getPreset();
+        if (current || selected) { g.setColour (t.accent.withAlpha (current ? 0.9f : 0.35f)); g.fillRect (0, 0, w, h); }
+        const Colour txt = current ? (t.accent.getPerceivedBrightness() > 0.6f ? Colours::black : Colours::white) : panelLabel (e, t);
+        g.setColour (Favourites::is (p) ? (current ? txt : t.accent) : txt.withAlpha (0.35f));
+        g.setFont (Font (FontOptions (15.0f)));
+        g.drawText (String::fromUTF8 (Favourites::is (p) ? "\xe2\x98\x85" : "\xe2\x98\x86"), 4, 0, 20, h, Justification::centred);
+        g.setColour (txt);
+        g.setFont (fonts.body (e, 13.0f));
+        g.drawText (info.name, 28, 0, w - 250, h, Justification::centredLeft);
+        g.setFont (fonts.body (e, 11.0f, false));
+        g.setColour (txt.withAlpha (0.8f));
+        g.drawText (String (era (info.era).year), w - 220, 0, 50, h, Justification::centredLeft);
+        g.drawText (categoryName (info.category), w - 170, 0, 80, h, Justification::centredLeft);
+        g.drawText (presetTypeName (info.type), w - 88, 0, 82, h, Justification::centredLeft);
+    }
+
+    void listBoxItemClicked (int row, const MouseEvent& ev) override
+    {
+        if (row < 0 || row >= (int) results.size()) return;
+        const int p = results[(size_t) row];
+        if (ev.x < 26) { Favourites::toggle (p); if (onlyFav) refilter(); list.repaint(); return; }
+        proc.setPreset (p);
+        list.repaint();
+    }
+
+    void listBoxItemDoubleClicked (int row, const MouseEvent&) override
+    {
+        if (row >= 0 && row < (int) results.size()) proc.previewPreset (results[(size_t) row]);
+    }
+
+    int countFor (int c) const
+    {
+        int n = 0;
+        for (int p : base) if (c < 0 || presetInfo (p).category == c) ++n;
+        return n;
+    }
+
+    void refilter()
+    {
+        const String q = search.getText().trim().toLowerCase();
+        const int eraSel = eraBox.getSelectedId() - 2, typeSel = typeBox.getSelectedId() - 2;
+        base.clear(); results.clear();
+        for (int p = 0; p < numPresets; ++p)
+        {
+            const auto& info = presetInfo (p);
+            if (eraSel >= 0 && info.era != eraSel) continue;
+            if (typeSel >= 0 && info.type != typeSel) continue;
+            if (onlyFav && ! Favourites::is (p)) continue;
+            if (q.isNotEmpty() && ! info.name.toLowerCase().contains (q) && ! String (categoryName (info.category)).toLowerCase().contains (q)
+                && ! String (era (info.era).year).contains (q))
+                continue;
+            base.push_back (p);
+            if (category < 0 || info.category == category) results.push_back (p);
+        }
+        list.updateContent();
+        list.repaint();
+        repaint();
+    }
+
+    void timerCallback() override { if (isShowing()) list.repaint(); }
+
+    TextEditor search;
+    ComboBox eraBox, typeBox;
+    ListBox list;
+    Rectangle<float> favBtn, catArea;
+    std::vector<int> base, results;
+    int category = -1;
+    bool onlyFav = false;
+};
+
+//==============================================================================
 class Content : public Component, private Timer
 {
 public:
@@ -1265,6 +1465,7 @@ public:
         pages[1] = std::make_unique<FxPage> (proc, fonts, knobLnf);
         pages[2] = std::make_unique<ArpPage> (proc, fonts, knobLnf);
         pages[3] = std::make_unique<MacroPage> (proc, fonts, knobLnf);
+        pages[4] = std::make_unique<BrowsePage> (proc, fonts, knobLnf);
         for (auto& pg : pages) addChildComponent (*pg);
         lastPreset = proc.getPreset();
         showIntro = ! proc.introSeen();
@@ -1328,7 +1529,7 @@ public:
         if (downHit.kind == Hit::drag)
             startWavDrag (proc.getPreset(), true);
         else if (downHit.kind == Hit::rowDrag || downHit.kind == Hit::row || downHit.kind == Hit::rowPlay)
-            startWavDrag (currentEra() * soundsPerEra + downHit.index);
+            startWavDrag (rowPreset (downHit.index));
     }
 
     void mouseUp (const MouseEvent& ev) override
@@ -1349,14 +1550,14 @@ public:
             case Hit::era:
                 proc.stopPreview();
                 playing = -1;
-                proc.setPreset (hit.index * soundsPerEra);
+                proc.setPreset (hit.index * presetsPerEra);
                 break;
             case Hit::prev: stepPreset (-1); break;
             case Hit::next: stepPreset (1); break;
             case Hit::rowPlay:
             case Hit::row:
             {
-                const int preset = currentEra() * soundsPerEra + hit.index;
+                const int preset = rowPreset (hit.index);
                 if (playing == preset && hit.kind == Hit::rowPlay)
                 {
                     proc.stopPreview();
@@ -1371,7 +1572,10 @@ public:
                 repaint();
                 break;
             }
+            case Hit::pagePrev: stepPage (-1); break;
+            case Hit::pageNext: stepPage (1); break;
             case Hit::tab:
+                if (hit.index == 6) if (auto* bp = dynamic_cast<BrowsePage*> (pages[4].get())) bp->showEra (currentEra());
                 page = hit.index;
                 updateTheme();
                 break;
@@ -1389,7 +1593,7 @@ private:
     //==========================================================================
     struct Hit
     {
-        enum Kind { none, start, era, prev, next, row, rowPlay, rowDrag, drag, logo, tab } kind = none;
+        enum Kind { none, start, era, prev, next, row, rowPlay, rowDrag, drag, logo, tab, pagePrev, pageNext } kind = none;
         int index = -1;
     };
 
@@ -1412,17 +1616,17 @@ private:
     Rectangle<float> startBtn { 430, 446, 240, 60 };
 
     bool showIntro = false, dragStarted = false;
-    static constexpr int numPages = 6;
-    std::unique_ptr<Page> pages[4];
+    static constexpr int numPages = 7;
+    std::unique_ptr<Page> pages[5];
     int page = 0, lastPreset = -1;
     std::unique_ptr<LayerPage> layerPage;
     Rectangle<float> pageArea { 332, 120, 748, 388 };
 
-    Rectangle<float> tabArea (int i) const { return { 582.0f + (float) i * 83.0f, 84.0f, 80.0f, 28.0f }; }
+    Rectangle<float> tabArea (int i) const { return { 570.0f + (float) i * 73.0f, 84.0f, 70.0f, 28.0f }; }
 
     void paintTabs (Graphics& g, int e, const Theme& t)
     {
-        static const char* names[numPages] = { "PLAY", "LAYERS", "MOD", "FX", "ARP", "MACRO" };
+        static const char* names[numPages] = { "PLAY", "LAYERS", "MOD", "FX", "ARP", "MACRO", "BROWSE" };
         for (int i = 0; i < numPages; ++i)
         {
             auto r = tabArea (i);
@@ -1430,7 +1634,7 @@ private:
             g.setColour (sel ? t.accent : t.lcd);
             if (t.frame == FrameStyle::pixel || t.frame == FrameStyle::flat) g.fillRect (r); else g.fillRoundedRectangle (r, jmin (t.corner, 6.0f));
             g.setColour (sel ? (t.accent.getPerceivedBrightness() > 0.6f ? Colours::black : Colours::white) : t.lcdInk);
-            g.setFont (fonts.body (e, 14.0f));
+            g.setFont (fonts.body (e, 12.5f));
             g.drawText (names[i], r, Justification::centred);
         }
     }
@@ -1442,13 +1646,23 @@ private:
         g.setFont (fonts.display (e, 26.0f));
         const String a = String (E.title).upToFirstOccurrenceOf ("\n", false, false), b = String (E.title).fromFirstOccurrenceOf ("\n", false, false);
         const String title = b.isEmpty() ? a : a + (CharacterFunctions::isLowerCase (b[0]) ? "" : " ") + b;
-        g.drawText (title, Rectangle<float> (332, 82, 520, 32), Justification::centredLeft);
+        g.drawFittedText (title, Rectangle<float> (332, 82, 230, 32).toNearestInt(), Justification::centredLeft, 1, 0.6f);
     }
     Hit downHit;
     int playing = -1;
     double playEndMs = 0;
 
     int currentEra() const { return eraOfPreset (proc.getPreset()); }
+    // the PLAY page lists the presets 6 at a time: the block of 6 that holds the current preset
+    int rowPreset (int i) const { return (proc.getPreset() / soundsPerEra) * soundsPerEra + i; }
+    Rectangle<float> pagePrevBtn { 820, 204, 26, 24 }, pageNextBtn { 946, 204, 26, 24 };
+    void stepPage (int d)
+    {
+        const int cur = proc.getPreset(), e = eraOfPreset (cur);
+        const int pagesInEra = presetsPerEra / soundsPerEra;
+        const int pg = ((cur % presetsPerEra) / soundsPerEra + d + pagesInEra) % pagesInEra;
+        proc.setPreset (e * presetsPerEra + pg * soundsPerEra);
+    }
 
     void layout()
     {
@@ -1469,7 +1683,7 @@ private:
             k.slider.setVisible (! showIntro && page == 0);
         layerPage->setTheme (&era (currentEra()).theme, currentEra());
         layerPage->setVisible (! showIntro && page == 1);
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < 5; ++i)
         {
             pages[i]->setTheme (&era (currentEra()).theme, currentEra());
             pages[i]->setVisible (! showIntro && page == i + 2);
@@ -1497,9 +1711,7 @@ private:
 
     void stepPreset (int d)
     {
-        const int e = currentEra();
-        const int idx = (proc.getPreset() - e * soundsPerEra + d + soundsPerEra) % soundsPerEra;
-        proc.setPreset (e * soundsPerEra + idx);
+        proc.setPreset ((proc.getPreset() + d + numPresets) % numPresets);
     }
 
     Hit hitTestArea (Point<float> p) const
@@ -1512,6 +1724,8 @@ private:
         for (int i = 0; i < numPages; ++i)
             if (tabArea (i).contains (p)) return { Hit::tab, i };
         if (page != 0 && ! strip.contains (p)) return {};
+        if (page == 0 && pagePrevBtn.contains (p)) return { Hit::pagePrev, 0 };
+        if (page == 0 && pageNextBtn.contains (p)) return { Hit::pageNext, 0 };
         for (int i = 0; i < soundsPerEra; ++i)
             if (rows[i].contains (p))
             {
@@ -1532,12 +1746,18 @@ private:
     void startWavDrag (int preset, bool renderCurrent = false)
     {
         MemoryBlock mb;
-        if (! (renderCurrent ? proc.renderCurrentWav (mb) : proc.getSoundWav (preset, mb)))
+        if (! renderCurrent && ! proc.getSoundWav (preset, mb))
+        {
+            // designed presets are rendered: load it, then render
+            if (proc.getPreset() != preset) proc.setPreset (preset);
+            renderCurrent = true;
+        }
+        if (renderCurrent && ! proc.renderCurrentWav (mb))
             return;
         auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("Bit Era");
         dir.createDirectory();
         const auto& E = era (eraOfPreset (preset));
-        auto f = dir.getChildFile (File::createLegalFileName (String ("Bit Era ") + E.year + " " + sound (preset).name + ".wav"));
+        auto f = dir.getChildFile (File::createLegalFileName (String ("Bit Era ") + E.year + " " + presetInfo (preset).name + ".wav"));
         if (! f.replaceWithData (mb.getData(), mb.getSize()))
             return;
         dragStarted = true;
@@ -1664,10 +1884,11 @@ private:
         g.drawText (">", d.withTrimmedLeft (d.getWidth() - 34), Justification::centred);
         g.setFont (fonts.body (e, 11.5f));
         g.setColour (t.lcdInk.withAlpha (0.85f));
-        g.drawText (String (era (e).year) + String::fromUTF8 ("  \xc2\xb7  ") + sound (preset).category, d.withHeight (18).translated (0, 4), Justification::centred);
+        g.drawText (String (era (e).year) + String::fromUTF8 ("  \xc2\xb7  ") + categoryName (presetInfo (preset).category) + String::fromUTF8 ("  \xc2\xb7  ")
+                    + String (preset % presetsPerEra + 1) + " / " + String (presetsPerEra), d.withHeight (18).translated (0, 4), Justification::centred);
         g.setColour (t.lcdInk);
         g.setFont (fonts.display (e, e == 5 ? 13.0f : 19.0f));
-        g.drawText (sound (preset).name, d.withTrimmedTop (16).reduced (36, 0), Justification::centred);
+        g.drawText (presetInfo (preset).name, d.withTrimmedTop (16).reduced (36, 0), Justification::centred);
 
         // DRAG WAV
         auto b = dragBtn;
@@ -1837,9 +2058,23 @@ private:
     void paintRows (Graphics& g, int e, const Theme& t)
     {
         const int preset = proc.getPreset();
+        {
+            // page navigation: 6 presets per page, 100 pages per era
+            const int first = (preset % presetsPerEra) / soundsPerEra * soundsPerEra;
+            g.setColour (t.lcd);
+            for (auto r : { pagePrevBtn, pageNextBtn }) g.fillRoundedRectangle (r, 3.0f);
+            g.setColour (t.lcdInk);
+            g.setFont (fonts.body (e, 13.0f));
+            g.drawText ("<", pagePrevBtn, Justification::centred);
+            g.drawText (">", pageNextBtn, Justification::centred);
+            g.setColour (e == 6 || e == 4 || e == 11 ? Colours::white : t.ink);
+            g.setFont (fonts.body (e, 12.0f));
+            g.drawText (String (first + 1) + "-" + String (first + soundsPerEra) + " / " + String (presetsPerEra),
+                        Rectangle<float> (pagePrevBtn.getRight(), pagePrevBtn.getY(), pageNextBtn.getX() - pagePrevBtn.getRight(), pagePrevBtn.getHeight()), Justification::centred);
+        }
         for (int i = 0; i < soundsPerEra; ++i)
         {
-            const int p = e * soundsPerEra + i;
+            const int p = rowPreset (i);
             const bool sel = p == preset, on = p == playing;
             auto r = rows[i];
             auto shape = panelShape (t, r);
@@ -1873,10 +2108,10 @@ private:
             g.setColour (t.ink);
             if (e == 6 || e == 4 || e == 11) g.setColour (Colours::white);
             g.setFont (fonts.body (e, e == 5 ? 13.0f : 15.0f));
-            g.drawText (sound (p).name, textR.withHeight (r.getHeight() * 0.6f), Justification::bottomLeft);
+            g.drawText (presetInfo (p).name, textR.withHeight (r.getHeight() * 0.6f), Justification::bottomLeft);
             g.setColour ((e == 6 || e == 4 || e == 11) ? Colours::white.withAlpha (0.8f) : t.ink.withAlpha (0.72f));
             g.setFont (fonts.body (e, 12.0f));
-            g.drawText (String (sound (p).category) + String::fromUTF8 ("  \xc2\xb7  ") + String (proc.getSoundLengthSeconds (p), 1) + "s",
+            g.drawText (String (categoryName (presetInfo (p).category)) + String::fromUTF8 ("  \xc2\xb7  ") + presetTypeName (presetInfo (p).type),
                         textR.withTrimmedTop (r.getHeight() * 0.6f), Justification::topLeft);
 
             // drag handle

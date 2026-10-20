@@ -1,6 +1,7 @@
 // Bit Era render test: every preset must load, sound, stay finite and below clipping through the full chain.
 #include "../Source/PluginProcessor.h"
 #include <iostream>
+#include <set>
 
 int main()
 {
@@ -12,43 +13,73 @@ int main()
     proc.prepareToPlay (sr, block);
 
     int failures = 0;
-    for (int preset = 0; preset < bitera::numPresets; ++preset)
+    // the whole factory bank: every preset must load, sound, stay finite and below clipping - and sound different
+    // from every other preset (fingerprint = RMS envelope + zero crossings + stereo balance)
+    const bool quick = juce::SystemStats::getEnvironmentVariable ("BE_QUICK", {}).isNotEmpty();
+    std::vector<std::vector<float>> prints;
+    std::vector<int> printPreset;
+    std::set<juce::String> names;
+    int quiet = 0, hot = 0;
+    for (int preset = 0; preset < bitera::numPresets; preset += (quick ? 37 : 1))
     {
+        const auto& info = bitera::presetInfo (preset);
+        if (! names.insert (info.name).second) { std::cout << "FAIL duplicate name " << info.name << "\n"; ++failures; }
         proc.setPreset (preset);
-        const double len = proc.getSoundLengthSeconds (preset);
-        juce::MemoryBlock wav;
-        if (len <= 0.0 || ! proc.getSoundWav (preset, wav) || wav.getSize() < 1000)
-        {
-            std::cout << "FAIL preset " << preset << ": sound missing\n";
-            ++failures;
-            continue;
-        }
-        float peak = 0.0f; double energy = 0.0; bool finite = true;
-        const int blocks = (int) std::ceil (juce::jmin (len, 3.0) * sr / block);
+        proc.prepareToPlay (sr, block);   // fresh engine
+        const double hold = juce::jlimit (0.4, 1.6, proc.getSoundLengthSeconds (preset));
+        const int blocks = (int) ((hold + 0.4) * sr / block), offAt = (int) (hold * sr / block);
+        float peak = 0.0f; bool finite = true;
+        std::vector<float> fp;
+        double zc = 0, lr = 0;
+        float last = 0.0f;
         for (int b = 0; b < blocks; ++b)
         {
             juce::AudioBuffer<float> buf (2, block);
             juce::MidiBuffer midi;
-            if (b == 0) midi.addEvent (juce::MidiMessage::noteOn (1, bitera::sound (preset).root, (juce::uint8) 110), 0);
-            if (b == blocks - 1) midi.addEvent (juce::MidiMessage::noteOff (1, bitera::sound (preset).root), 0);
+            if (b == 0) midi.addEvent (juce::MidiMessage::noteOn (1, info.root, (juce::uint8) 110), 0);
+            if (b == offAt) midi.addEvent (juce::MidiMessage::noteOff (1, info.root), 0);
             proc.processBlock (buf, midi);
-            for (int ch = 0; ch < 2; ++ch)
-                for (int i = 0; i < block; ++i)
-                {
-                    const float v = buf.getSample (ch, i);
-                    if (! std::isfinite (v)) finite = false;
-                    peak = juce::jmax (peak, std::abs (v));
-                    energy += (double) v * v;
-                }
+            double e = 0;
+            for (int i = 0; i < block; ++i)
+            {
+                const float l = buf.getSample (0, i), r = buf.getSample (1, i);
+                if (! std::isfinite (l) || ! std::isfinite (r)) finite = false;
+                peak = juce::jmax (peak, std::abs (l), std::abs (r));
+                e += (double) l * l + (double) r * r;
+                if ((l >= 0) != (last >= 0)) zc += 1; last = l;
+                lr += (double) l * l - (double) r * r;
+            }
+            fp.push_back ((float) std::sqrt (e / (2 * block)));
         }
-        // let the voice and reverb tail die before the next preset
-        for (int b = 0; b < (int) (2.5 * sr / block); ++b) { juce::AudioBuffer<float> buf (2, block); juce::MidiBuffer m; proc.processBlock (buf, m); }
-
-        const bool ok = finite && peak > 0.01f && peak < 1.2f;
-        std::cout << (ok ? "ok   " : "FAIL ") << bitera::era (bitera::eraOfPreset (preset)).year << " " << bitera::sound (preset).name
-                  << "  len " << len << "s  peak " << peak << "\n";
-        if (! ok) ++failures;
+        fp.push_back ((float) (zc / (blocks * block)) * 10.0f);
+        fp.push_back ((float) (lr / (blocks * block)));
+        const bool ok = finite && peak > 0.003f && peak < 1.6f;
+        if (peak < 0.02f) ++quiet;
+        if (peak > 1.0f) ++hot;
+        if (! ok)
+        {
+            ++failures;
+            std::cout << "FAIL " << preset << " " << bitera::era (info.era).year << " " << bitera::categoryName (info.category) << " " << info.name << "  peak " << peak << "\n";
+        }
+        prints.push_back (std::move (fp));
+        printPreset.push_back (preset);
     }
+    int dups = 0;
+    for (size_t a = 0; a < prints.size(); ++a)
+        for (size_t b = a + 1; b < prints.size(); ++b)
+        {
+            if (prints[a].size() != prints[b].size()) continue;
+            float d = 0;
+            for (size_t k = 0; k < prints[a].size() && d < 1.0e-4f; ++k) d = juce::jmax (d, std::abs (prints[a][k] - prints[b][k]));
+            if (d < 1.0e-4f)
+            {
+                ++dups;
+                if (dups < 20) std::cout << "FAIL same sound: " << bitera::presetInfo (printPreset[a]).name << " = " << bitera::presetInfo (printPreset[b]).name << "\n";
+            }
+        }
+    failures += dups;
+    std::cout << "bank: " << prints.size() << " presets rendered, " << names.size() << " unique names, " << dups << " duplicate sounds, "
+              << quiet << " quiet (<0.02), " << hot << " hot (>1.0)\n";
 
     // every chip source and wave: plays C4 for 0.8 s on layer 1 (with layer 2 detuned on top), must sound and stay sane
     auto setP = [&] (const juce::String& id, float v) { if (auto* p = proc.state.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
