@@ -1,0 +1,137 @@
+name: bitera
+
+# BIT ERA by TrapWin (branch "bitera" of this repo): builds, tests and packages Windows (VST3 + Standalone)
+# and macOS (VST3 + AU + Standalone, universal). Every push publishes the latest test build to fixed links:
+#   https://github.com/txcjournal-byte/trapwin-limiter/releases/download/bitera-test/BIT-ERA-Setup-Windows.exe
+#   https://github.com/txcjournal-byte/trapwin-limiter/releases/download/bitera-test/BIT-ERA-VST3-Windows.zip
+#   https://github.com/txcjournal-byte/trapwin-limiter/releases/download/bitera-test/BIT-ERA-Setup-Mac.pkg
+#   https://github.com/txcjournal-byte/trapwin-limiter/releases/download/bitera-test/BIT-ERA-VST3-Mac.zip
+#   https://github.com/txcjournal-byte/trapwin-limiter/releases/download/bitera-test/BIT-ERA-AU-Mac.zip
+on:
+  push:
+    branches: [bitera]
+  workflow_dispatch:
+
+concurrency:
+  group: bitera-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        with:
+          path: build-bitera
+          key: bitera-win-${{ hashFiles('CMakeLists.txt') }}-${{ github.sha }}
+          restore-keys: bitera-win-${{ hashFiles('CMakeLists.txt') }}-
+
+      - name: Configure
+        run: cmake -S . -B build-bitera -A x64
+
+      - name: Build
+        run: cmake --build build-bitera --config Release --parallel --target BitEra_VST3 BitEra_Standalone BitEraTests
+
+      - name: Render test (all presets)
+        shell: pwsh
+        run: |
+          & build-bitera\BitEraTests_artefacts\Release\BitEraTests.exe
+          exit $LASTEXITCODE
+
+      - name: pluginval (strictness 8)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval -Force
+          & .\pluginval\pluginval.exe --strictness-level 8 --verbose --validate "build-bitera\BitEra_artefacts\Release\VST3\Bit Era.vst3" 2>&1 | ForEach-Object { "$_" }
+          exit $LASTEXITCODE
+
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(BIT_ERA VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          Remove-Item -Recurse -Force build-bitera\installer -ErrorAction SilentlyContinue
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" installer\win\bitera.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Publish test build (fixed links)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force out, out\stage | Out-Null
+          Copy-Item (Get-ChildItem build-bitera\installer\*.exe | Select-Object -First 1).FullName out\BIT-ERA-Setup-Windows.exe
+          Copy-Item -LiteralPath "build-bitera\BitEra_artefacts\Release\VST3\Bit Era.vst3" -Destination out\stage -Recurse -Force
+          Get-ChildItem out\stage -Recurse -File -Include *.pdb,*.ilk,*.exp,*.lib | Remove-Item -Force
+          Compress-Archive -LiteralPath "out\stage\Bit Era.vst3" -DestinationPath out\BIT-ERA-VST3-Windows.zip -Force
+          $notes = "Bit Era - latest test build`n`nCommit: ${{ github.sha }}`nBranch: ${{ github.ref_name }}`nBuilt: $(Get-Date -Format u)"
+          gh release view bitera-test *> $null
+          if ($LASTEXITCODE -ne 0) { gh release create bitera-test --prerelease --title "BIT ERA - latest test build" --notes $notes --target ${{ github.sha }} }
+          else { gh release edit bitera-test --notes $notes }
+          gh release upload bitera-test out\BIT-ERA-Setup-Windows.exe out\BIT-ERA-VST3-Windows.zip --clobber
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure (universal)
+        run: cmake -S . -B build-bitera -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build-bitera --config Release --parallel 4 --target BitEra_VST3 BitEra_AU BitEra_Standalone BitEraTests
+
+      - name: Render test (all presets)
+        run: ./build-bitera/BitEraTests_artefacts/Release/BitEraTests
+
+      - name: auval
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build-bitera/BitEra_artefacts/Release/AU/Bit Era.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 5
+          auval -v aumu Btea Trpw
+
+      - name: pluginval (strictness 8)
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q -o pluginval.zip
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 8 --validate-in-process --validate "build-bitera/BitEra_artefacts/Release/VST3/Bit Era.vst3"
+
+      - name: Mac signing setup (same secrets as EVOLVE; unsigned when they are missing)
+        env:
+          MAC_CERT_APP_P12: ${{ secrets.MAC_CERT_APP_P12 }}
+          MAC_CERT_INSTALLER_P12: ${{ secrets.MAC_CERT_INSTALLER_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: installer/mac/setup_signing.sh
+
+      - name: Installer (pkg; signed + notarized when secrets exist)
+        run: |
+          VERSION=$(sed -n 's/project(BIT_ERA VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          installer/mac/build_pkg.sh "$VERSION"
+
+      - name: Publish test build (fixed links)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out
+          cp build-bitera/installer/BIT-ERA-*-macOS.pkg out/BIT-ERA-Setup-Mac.pkg
+          cp build-bitera/installer/BIT-ERA-VST3-Mac.zip build-bitera/installer/BIT-ERA-AU-Mac.zip out/
+          if ! gh release view bitera-test > /dev/null 2>&1; then
+            gh release create bitera-test --prerelease --title "BIT ERA - latest test build" --notes "Bit Era - latest test build" --target "$GITHUB_SHA" || true
+          fi
+          gh release upload bitera-test out/BIT-ERA-Setup-Mac.pkg out/BIT-ERA-VST3-Mac.zip out/BIT-ERA-AU-Mac.zip --clobber

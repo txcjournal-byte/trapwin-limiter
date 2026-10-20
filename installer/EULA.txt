@@ -1,0 +1,12 @@
+BIT ERA by TrapWin - End User License Agreement (test build)
+
+This is a pre-release test build of Bit Era. It is provided "as is", without warranty of any kind.
+
+1. You may install and use this build on your own computers for testing.
+2. The sounds and presets included in Bit Era are royalty-free: you may use them in your own music and
+   media, commercial or not, without crediting TrapWin.
+3. You may not resell, redistribute or share the plugin, its sounds, presets or artwork as they are,
+   or as part of another sample pack, preset bank or instrument.
+4. TrapWin is not liable for any damage or data loss arising from the use of this test build.
+
+(c) TrapWin - trapwin.com
