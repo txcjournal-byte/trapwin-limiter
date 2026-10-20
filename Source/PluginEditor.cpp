@@ -286,13 +286,12 @@ public:
             master[i].id = mIds[i]; master[i].name = mNames[i];
             setupKnob (master[i].slider);
             addAndMakeVisible (master[i].slider);
-            master[i].attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.state, mIds[i], master[i].slider);
+            if (i > 0) master[i].attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.state, mIds[i], master[i].slider);
         }
         for (int s = 0; s < chips::numSources; ++s) source.addItem (chips::sourceName (s), s + 1);
         for (int f = 0; f < numFilterTypes; ++f) filter.addItem (filterName (f), f + 1);
         mode.addItemList ({ "POLY", "MONO", "LEGATO" }, 1);
         for (auto* c : { &source, &filter, &mode }) { addAndMakeVisible (*c); c->setJustificationType (Justification::centredLeft); }
-        modeAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.state, "mode", mode);
         source.onChange = [this] { clampWave(); repaint(); };
         attachLayer (0);
         startTimerHz (15);
@@ -410,7 +409,7 @@ public:
         g.strokePath (panelShape (t, bottom.withTrimmedTop (4)), PathStrokeType (1.0f));
         g.setColour (ink);
         g.setFont (fonts.body (e, 14.0f));
-        g.drawText ("MASTER", bottom.withTrimmedLeft (14).withTrimmedTop (4), Justification::centredLeft);
+        g.drawText ("L" + String (layer + 1) + " VOICE", bottom.withTrimmedLeft (14).withTrimmedTop (4), Justification::centredLeft);
         for (auto& m : master)
         {
             g.setColour (ink);
@@ -418,7 +417,7 @@ public:
             auto txt = m.area.withTrimmedLeft (50);
             g.drawText (m.name, txt.withHeight (txt.getHeight() * 0.5f), Justification::bottomLeft);
             g.setFont (fonts.body (e, 13.0f, false));
-            auto* param = proc.state.getParameter (m.id);
+            auto* param = proc.state.getParameter (&m == &master[0] ? BitEraProcessor::layerId (layer, m.id) : String (m.id));
             g.drawText (param != nullptr ? param->getCurrentValueAsText() : String(), txt.withTrimmedTop (txt.getHeight() * 0.5f), Justification::topLeft);
         }
     }
@@ -486,7 +485,10 @@ private:
             c.attachment.reset();
             c.attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.state, BitEraProcessor::layerId (layer, c.id), c.slider);
         }
-        sourceAttachment.reset(); filterAttachment.reset();
+        sourceAttachment.reset(); filterAttachment.reset(); modeAttachment.reset();
+        master[0].attachment.reset();
+        master[0].attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.state, BitEraProcessor::layerId (layer, "glide"), master[0].slider);
+        modeAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.state, BitEraProcessor::layerId (layer, "mode"), mode);
         sourceAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.state, BitEraProcessor::layerId (layer, "src"), source);
         filterAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.state, BitEraProcessor::layerId (layer, "filter"), filter);
         repaint();

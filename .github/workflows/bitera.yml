@@ -49,8 +49,13 @@ jobs:
           $ErrorActionPreference = 'Continue'
           Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
           Expand-Archive pluginval.zip -DestinationPath pluginval -Force
-          & .\pluginval\pluginval.exe --strictness-level 8 --verbose --validate "build-bitera\BitEra_artefacts\Release\VST3\Bit Era.vst3" 2>&1 | ForEach-Object { "$_" }
-          exit $LASTEXITCODE
+          & .\pluginval\pluginval.exe --strictness-level 8 --verbose --validate "build-bitera\BitEra_artefacts\Release\VST3\Bit Era.vst3" 2>&1 | Tee-Object -FilePath pluginval.log | ForEach-Object { "$_" }
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Select-String -Path pluginval.log -Pattern 'fail|error|crash|exception|assert|!!!' | Select-Object -Last 25 | ForEach-Object { Write-Output "::error title=pluginval::$($_.Line)" }
+            Get-Content pluginval.log -Tail 30 | ForEach-Object { Write-Output "::warning title=pluginval tail::$_" }
+          }
+          exit $code
 
       - name: Installer (Inno Setup)
         shell: pwsh
@@ -106,7 +111,16 @@ jobs:
         run: |
           curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
           unzip -q -o pluginval.zip
-          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 8 --validate-in-process --validate "build-bitera/BitEra_artefacts/Release/VST3/Bit Era.vst3"
+          set +e
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 8 --verbose --validate-in-process --validate "build-bitera/BitEra_artefacts/Release/VST3/Bit Era.vst3" > pluginval.log 2>&1
+          code=$?
+          cat pluginval.log
+          if [ $code -ne 0 ]; then
+            # surface the failure in the run summary (the raw log is not always reachable)
+            grep -n -i -E "fail|error|crash|exception|assert|!!!" pluginval.log | tail -25 | while IFS= read -r line; do echo "::error title=pluginval::${line}"; done
+            tail -30 pluginval.log | while IFS= read -r line; do echo "::warning title=pluginval tail::${line}"; done
+          fi
+          exit $code
 
       - name: Mac signing setup (same secrets as EVOLVE; unsigned when they are missing)
         env:
