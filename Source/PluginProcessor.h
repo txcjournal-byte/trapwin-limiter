@@ -71,7 +71,9 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void loadBank();
-    void readParams (bitera::EngineParams& p);
+    void readParams (bitera::EngineParams& p, bool messageThread = false);
+    int renderNote (bitera::EngineParams& p, int note, double holdSec, double maxTailSec, juce::AudioBuffer<float>& result);
+    void levelPreset();
     void setParam (const juce::String& id, float value);
     void pushSteps();   // message thread: copy the step tables for the audio thread
     juce::ValueTree stepsTree (int layer);
@@ -100,7 +102,7 @@ private:
     std::atomic<float>* macro[bitera::numMacros] {};
     std::atomic<float>* xy[4] {};
     FxPtrs mfx[bitera::masterFxSlots] {};
-    std::atomic<float> *pBend = nullptr, *pVolume = nullptr, *pTone = nullptr, *pSpace = nullptr;
+    std::atomic<float> *pBend = nullptr, *pVolume = nullptr, *pTrim = nullptr, *pTone = nullptr, *pSpace = nullptr;
 
     struct StepTable
     {

@@ -66,7 +66,7 @@ BitEraProcessor::BitEraProcessor()
     for (int k = 0; k < bitera::numMacros; ++k) macro[k] = raw ("macro" + juce::String (k + 1));
     xy[0] = raw ("xy1x"); xy[1] = raw ("xy1y"); xy[2] = raw ("xy2x"); xy[3] = raw ("xy2y");
     pBend = raw ("bend");
-    pVolume = raw ("volume"); pTone = raw ("tone"); pSpace = raw ("space");
+    pVolume = raw ("volume"); pTrim = raw ("trim"); pTone = raw ("tone"); pSpace = raw ("space");
 
     loadBank();
     engine.setBank (&bank);
@@ -222,6 +222,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout BitEraProcessor::createLayou
         fAttr ([] (float v, int) { return String (roundToInt (v)) + " st"; })));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "volume", 1 }, "Volume", NormalisableRange<float> (-36.0f, 6.0f, 0.1f), -6.0f,
         fAttr ([] (float v, int) { return String (v, 1) + " dB"; })));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "trim", 1 }, "Preset Trim", NormalisableRange<float> (-24.0f, 24.0f, 0.01f), 0.0f,
+        fAttr ([] (float v, int) { return String (v, 1) + " dB"; })));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "tone", 1 }, "Tone", NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f, fAttr (pctText)));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "space", 1 }, "Space", NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.15f, fAttr (pctText)));
     return layout;
@@ -255,14 +257,22 @@ void BitEraProcessor::loadBank()
     bitera::chips::registerBank (&bank);
 }
 
-void BitEraProcessor::readParams (bitera::EngineParams& p)
+void BitEraProcessor::readParams (bitera::EngineParams& p, bool messageThread)
 {
     auto fxRead = [] (const FxPtrs& f, bitera::FxParams& o)
     {
         o.type = (int) f.type->load(); o.p[0] = f.p1->load(); o.p[1] = f.p2->load(); o.p[2] = f.p3->load(); o.mix = f.mix->load();
     };
     // step tables: take the newest copy if the message thread is not writing it right now
-    if (audioStepsVersion != stepsVersion.load())
+    StepTable* steps = audioSteps;
+    StepTable latest[bitera::numLayers];
+    if (messageThread)
+    {
+        const juce::SpinLock::ScopedLockType lock (stepLock);
+        std::copy (std::begin (pendingSteps), std::end (pendingSteps), std::begin (latest));
+        steps = latest;
+    }
+    else if (audioStepsVersion != stepsVersion.load())
     {
         const juce::SpinLock::ScopedTryLockType lock (stepLock);
         if (lock.isLocked())
@@ -290,7 +300,7 @@ void BitEraProcessor::readParams (bitera::EngineParams& p)
         o.arpMode = (int) l.arp->load(); o.arpDir = (int) l.arpDir->load(); o.arpSync = (int) l.arpRate->load();
         o.arpOctaves = (int) l.arpOct->load(); o.arpSteps = (int) l.arpSteps->load();
         o.arpGate = l.arpGate->load(); o.arpSwing = l.arpSwing->load(); o.arpEnd = (int) l.arpEnd->load();
-        const auto& st = audioSteps[i];
+        const auto& st = steps[i];
         for (int k = 0; k < bitera::maxSteps; ++k)
         {
             o.stepVel[k] = st.vel[k]; o.stepGate[k] = st.gate[k]; o.stepPan[k] = st.pan[k];
@@ -309,7 +319,7 @@ void BitEraProcessor::readParams (bitera::EngineParams& p)
     for (int k = 0; k < bitera::numMacros; ++k) p.macro[k] = macro[k]->load();
     for (int k = 0; k < 4; ++k) p.xy[k] = xy[k]->load();
     p.bendRange = pBend->load();
-    p.volumeDb = pVolume->load(); p.tone = pTone->load(); p.space = pSpace->load();
+    p.volumeDb = pVolume->load(); p.trimDb = pTrim->load(); p.tone = pTone->load(); p.space = pSpace->load();
 }
 
 int BitEraProcessor::getPreset() const
@@ -342,6 +352,7 @@ void BitEraProcessor::setPreset (int preset)
     for (auto& pr : patch.params) setParam (pr.first, pr.second);
     for (auto& st : patch.steps) stepsTree (st.layer).setProperty (juce::String (st.field) + juce::String (st.step), st.value, nullptr);
     pushSteps();
+    levelPreset();
 }
 
 juce::ValueTree BitEraProcessor::stepsTree (int layer)
@@ -458,25 +469,20 @@ void BitEraProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     engine.process (buffer, midi, params);
 }
 
-bool BitEraProcessor::renderCurrentWav (juce::MemoryBlock& out)
+int BitEraProcessor::renderNote (bitera::EngineParams& p, int note, double holdSec, double maxTailSec, juce::AudioBuffer<float>& result)
 {
     constexpr double rate = 44100.0;
     constexpr int block = 512;
     bitera::Engine offline;
     offline.setBank (&bank);
     offline.prepare (rate, block);
-    bitera::EngineParams p;
-    readParams (p);
-    const int note = previewNote (getPreset());
-    const double holdSec = juce::jlimit (0.3, 12.0, getSoundLengthSeconds (getPreset()) + 0.05);
-    const int holdSamples = (int) (holdSec * rate), maxSamples = (int) ((holdSec + 8.0) * rate);
-
-    juce::AudioBuffer<float> result (2, maxSamples);
+    const int holdSamples = (int) (holdSec * rate), maxSamples = (int) ((holdSec + maxTailSec) * rate);
+    result.setSize (2, maxSamples, false, true, false);
     result.clear();
     int written = 0, quiet = 0;
+    juce::AudioBuffer<float> buf (2, block);
     while (written < maxSamples)
     {
-        juce::AudioBuffer<float> buf (2, block);
         buf.clear();
         juce::MidiBuffer midi;
         if (written == 0) midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 110), 0);
@@ -491,6 +497,37 @@ bool BitEraProcessor::renderCurrentWav (juce::MemoryBlock& out)
             if (quiet > (int) (0.3 * rate)) break;
         }
     }
+    return written;
+}
+
+void BitEraProcessor::levelPreset()
+{
+    // play the preset once off-line and set its trim so the bank sits at one level (peak and loudness)
+    setParam ("trim", 0.0f);
+    bitera::EngineParams p;
+    readParams (p, true);
+    p.volumeDb = 0.0f; p.trimDb = 0.0f;
+    const double hold = juce::jlimit (0.3, 1.2, getSoundLengthSeconds (getPreset()));
+    juce::AudioBuffer<float> buf;
+    const int n = renderNote (p, previewNote (getPreset()), hold, 0.2, buf);
+    float peak = 0.0f; double sum = 0.0;
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < n; ++i) { const float v = buf.getSample (c, i); peak = juce::jmax (peak, std::abs (v)); sum += (double) v * v; }
+    const float rms = (float) std::sqrt (sum / juce::jmax (1, 2 * n));
+    if (peak < 1.0e-5f) return;
+    // targets (before the -6 dB default volume): peak -1 dBFS, loudness -15 dBFS RMS - whichever is reached first
+    const float g = juce::jmin (0.89f / peak, 0.178f / juce::jmax (rms, 1.0e-6f));
+    setParam ("trim", juce::jlimit (-24.0f, 24.0f, juce::Decibels::gainToDecibels (g)));
+}
+
+bool BitEraProcessor::renderCurrentWav (juce::MemoryBlock& out)
+{
+    constexpr double rate = 44100.0;
+    bitera::EngineParams p;
+    readParams (p, true);
+    const double holdSec = juce::jlimit (0.3, 12.0, getSoundLengthSeconds (getPreset()) + 0.05);
+    juce::AudioBuffer<float> result;
+    const int written = renderNote (p, previewNote (getPreset()), holdSec, 8.0, result);
     // trim the silent end
     int end = written;
     while (end > 1 && std::abs (result.getSample (0, end - 1)) < 1.0e-4f && std::abs (result.getSample (1, end - 1)) < 1.0e-4f) --end;

@@ -99,4 +99,13 @@ if(BE_BUILD_TESTS)
         JucePlugin_Name="Bit Era" JucePlugin_IsSynth=1 JucePlugin_WantsMidiInput=1 JucePlugin_ProducesMidiOutput=0
         JucePlugin_IsMidiEffect=0 JucePlugin_VersionString="${PROJECT_VERSION}" JucePlugin_Build_Standalone=0)
     target_link_libraries(BitEraSnapshot PRIVATE BitEraData juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+
+    # demo renders of chosen presets (for listening without a DAW)
+    juce_add_console_app(BitEraRenderDemo PRODUCT_NAME "BitEraRenderDemo")
+    target_sources(BitEraRenderDemo PRIVATE tests/RenderDemo.cpp Source/PluginProcessor.cpp Source/Eras.cpp Source/Chips.cpp Source/Engine.cpp Source/Fx.cpp Source/Presets.cpp)
+    target_compile_definitions(BitEraRenderDemo PRIVATE
+        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 BE_HEADLESS=1 BE_VERSION_STRING="${PROJECT_VERSION}"
+        JucePlugin_Name="Bit Era" JucePlugin_IsSynth=1 JucePlugin_WantsMidiInput=1 JucePlugin_ProducesMidiOutput=0
+        JucePlugin_IsMidiEffect=0 JucePlugin_VersionString="${PROJECT_VERSION}")
+    target_link_libraries(BitEraRenderDemo PRIVATE BitEraData juce::juce_audio_processors juce::juce_audio_formats juce::juce_dsp juce::juce_recommended_config_flags)
 endif()

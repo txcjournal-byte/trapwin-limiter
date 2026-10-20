@@ -647,7 +647,7 @@ void Engine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& 
     rp.wetLevel = space * 0.55f; rp.dryLevel = 1.0f - space * 0.35f;
     reverb.setParameters (rp);
     if (space > 0.001f) reverb.process (ctx);
-    gain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-60.0f, 12.0f, p.volumeDb + mm[mdVolume] * 24.0f)));
+    gain.setTargetValue (juce::Decibels::decibelsToGain (juce::jlimit (-60.0f, 24.0f, p.volumeDb + p.trimDb + mm[mdVolume] * 24.0f)));
     gain.applyGain (buffer, n);
 
     // output safety: transparent below -3 dBFS, soft knee above, never past -0.2 dBFS

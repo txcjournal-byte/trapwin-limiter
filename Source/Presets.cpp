@@ -657,7 +657,7 @@ std::vector<PresetInfo> buildInfos()
             if (cat == cDrums && v % 8 == 0) info.root = 36;
             info.previewSeconds = cat == cArp || cat == cSeq ? 4.0f : (cat == cPad || cat == cStrings || cat == cVoice ? 3.0f : 1.6f);
             const juce::String noun = cat == cDrums ? juce::String (nouns[cDrums][v % 8]) : cat == cPerc ? juce::String (nouns[cPerc][v % 12])
-                                    : cat == cFx ? juce::String (nouns[cFx][v % 12]) : juce::String (nouns[cat][(v * 5 + v / 25) % 12]);
+                                    : cat == cFx ? juce::String (nouns[cFx][v % 12]) : juce::String (nouns[cat][(v * 5 + v / 25 + e * 7) % 12]);
             int a = (v * 7 + cat * 3) % 25;
             juce::String name;
             for (int tries = 0; tries < 25; ++tries)

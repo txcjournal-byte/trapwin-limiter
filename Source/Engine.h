@@ -90,7 +90,7 @@ struct EngineParams
     float xy[4] { 0.5f, 0.5f, 0.5f, 0.5f };
     FxParams masterFx[masterFxSlots];
     float bendRange = 2.0f;
-    float volumeDb = -6.0f, tone = 1.0f, space = 0.15f;
+    float volumeDb = -6.0f, trimDb = 0.0f, tone = 1.0f, space = 0.15f;
     double bpm = 120.0, ppq = 0.0;
     bool playing = false;
 };
