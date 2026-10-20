@@ -58,7 +58,7 @@ private:
 
     struct EraSound;
     juce::Synthesiser synth;
-    std::atomic<int> activePreset { bitera::numPresets - 3 };
+    std::atomic<int> activePreset { (bitera::numEras - 1) * bitera::soundsPerEra };
     std::atomic<int> previewRequest { -1 }, previewStop { 0 };
     int previewNote = -1;
     double soundLength[bitera::numPresets] {};

@@ -12,6 +12,7 @@ struct SoundInfo
     const char* name;
     const char* category;
     const char* resource;   // original file name in BinaryData
+    int root = 60;          // MIDI key that plays the sound at its recorded pitch
 };
 
 struct Theme
@@ -38,12 +39,12 @@ struct Era
     const char* title;   // two lines separated by '\n'
     const char* line;
     const char* cover;   // original file name in BinaryData
-    SoundInfo sounds[3];
+    SoundInfo sounds[6];   // 0-2: one-shots (single note / single hit), 3-5: phrases, loops, FX
     Theme theme;
 };
 
 constexpr int numEras = 12;
-constexpr int soundsPerEra = 3;
+constexpr int soundsPerEra = 6;
 constexpr int numPresets = numEras * soundsPerEra;
 
 const Era& era (int index);

@@ -419,7 +419,7 @@ private:
     void layout()
     {
         for (int i = 0; i < soundsPerEra; ++i)
-            rows[i] = { 332.0f, 232.0f + (float) i * 52.0f, 640.0f, 46.0f };
+            rows[i] = { 332.0f + (float) (i / 3) * 326.0f, 232.0f + (float) (i % 3) * 52.0f, 314.0f, 46.0f };   // left: one-shots, right: phrases / loops / FX
         const float kw = (knobPanel.getWidth() - 28.0f) / 6.0f;
         for (int i = 0; i < 6; ++i)
             knobs[i].slider.setBounds (Rectangle<float> (knobPanel.getX() + 14.0f + (float) i * kw, knobPanel.getY() + 24.0f, kw, 58.0f)
@@ -821,24 +821,24 @@ private:
             g.fillPath (icon);
 
             // name + category
-            auto textR = r.withTrimmedLeft (58).withTrimmedRight (150);
+            auto textR = r.withTrimmedLeft (54).withTrimmedRight (88);
             g.setColour (t.ink);
             if (e == 6 || e == 4 || e == 11) g.setColour (Colours::white);
-            g.setFont (fonts.body (e, e == 5 ? 12.0f : 15.0f));
+            g.setFont (fonts.body (e, e == 5 ? 13.0f : 15.0f));
             g.drawText (sound (p).name, textR.withHeight (r.getHeight() * 0.6f), Justification::bottomLeft);
-            g.setColour (t.muted);
-            g.setFont (fonts.body (e, 10.0f, false));
-            g.drawText (sound (p).category, textR.withTrimmedTop (r.getHeight() * 0.6f), Justification::topLeft);
+            g.setColour ((e == 6 || e == 4 || e == 11) ? Colours::white.withAlpha (0.8f) : t.ink.withAlpha (0.72f));
+            g.setFont (fonts.body (e, 12.0f));
+            g.drawText (String (sound (p).category) + String::fromUTF8 ("  \xc2\xb7  ") + String (proc.getSoundLengthSeconds (p), 1) + "s",
+                        textR.withTrimmedTop (r.getHeight() * 0.6f), Justification::topLeft);
 
-            // length + drag handle
-            g.drawText (String (proc.getSoundLengthSeconds (p), 1) + "s", r.withTrimmedRight (92).withTrimmedLeft (r.getWidth() - 150), Justification::centredRight);
+            // drag handle
             auto chip = Rectangle<float> (r.getRight() - 84, r.getCentreY() - 13, 72, 26);
             g.setColour (t.lcd.withAlpha (0.9f));
             if (sq) g.fillRect (chip); else g.fillRoundedRectangle (chip, jmin (t.corner, 13.0f));
             g.setColour (t.lcdInk);
             for (int k = 0; k < 3; ++k)
                 g.fillRect (chip.getX() + 16.0f, chip.getCentreY() - 5.0f + (float) k * 4.0f, 9.0f, 1.6f);
-            g.setFont (fonts.body (e, 10.5f));
+            g.setFont (fonts.body (e, 13.0f));
             g.drawText ("WAV", chip.withTrimmedLeft (22), Justification::centred);
         }
     }
@@ -866,18 +866,18 @@ private:
         }
 
         const bool darkPanel = fill.getPerceivedBrightness() < 0.4f || e == 11 || e == 4 || e == 6;
-        const Colour label = (e == 3 ? t.accent2 : darkPanel ? Colours::white.withAlpha (0.75f) : t.muted);
+        const Colour label = (e == 3 ? t.accent2 : darkPanel ? Colours::white : t.ink);
         for (auto& k : knobs)
         {
             auto kb = k.slider.getBounds().toFloat();
             g.setColour (label);
-            g.setFont (fonts.body (e, 9.0f));
-            g.drawText (k.name, kb.withY (r.getY() + 6).withHeight (14).expanded (20, 0), Justification::centred);
-            auto vb = Rectangle<float> (kb.getCentreX() - 30, kb.getBottom() + 4, 60, 16);
+            g.setFont (fonts.body (e, 13.0f));
+            g.drawText (k.name, kb.withY (r.getY() + 4).withHeight (18).expanded (24, 0), Justification::centred);
+            auto vb = Rectangle<float> (kb.getCentreX() - 36, kb.getBottom() + 3, 72, 19);
             g.setColour (t.lcd);
             if (t.frame == FrameStyle::pixel || t.frame == FrameStyle::flat) g.fillRect (vb); else g.fillRoundedRectangle (vb, 3.0f);
             g.setColour (t.lcdInk);
-            g.setFont (fonts.body (e, 10.0f, false));
+            g.setFont (fonts.body (e, 12.5f));
             auto* param = proc.state.getParameter (k.id);
             g.drawText (param != nullptr ? param->getCurrentValueAsText() : String(), vb, Justification::centred);
         }
@@ -897,14 +897,14 @@ private:
                 g.setColour (Colours::black.withAlpha (0.45f));
                 g.fillRect (r);
             }
-            g.setGradientFill (ColourGradient (Colours::transparentBlack, 0, r.getY() + r.getHeight() * 0.35f, Colours::black.withAlpha (0.9f), 0, r.getBottom(), false));
+            g.setGradientFill (ColourGradient (Colours::transparentBlack, 0, r.getY() + r.getHeight() * 0.35f, Colours::black.withAlpha (0.97f), 0, r.getBottom() - 20.0f, false));
             g.fillRect (r);
             g.setColour (sel ? Colour (0xffffd23a) : Colours::white);
-            g.setFont (fonts.from (fonts.barlow, 18.0f));
-            g.drawText (era (i).year, r.withTrimmedTop (r.getHeight() - 38).withTrimmedLeft (6), Justification::topLeft);
-            g.setColour (Colours::white.withAlpha (0.8f));
-            g.setFont (Font (FontOptions (9.0f)));
-            g.drawText (era (i).shortName, r.withTrimmedTop (r.getHeight() - 18).withTrimmedLeft (6), Justification::topLeft);
+            g.setFont (fonts.from (fonts.barlow, 22.0f));
+            g.drawText (era (i).year, r.withTrimmedTop (r.getHeight() - 44).withTrimmedLeft (6), Justification::topLeft);
+            g.setColour (Colours::white);
+            g.setFont (fonts.sys ("Arial", 12.5f, Font::bold));
+            g.drawText (era (i).shortName, r.withTrimmedTop (r.getHeight() - 20).withTrimmedLeft (6), Justification::topLeft);
             g.setColour (sel ? Colour (0xffffd23a) : Colours::black.withAlpha (0.5f));
             g.drawRect (r, sel ? 2.0f : 1.0f);
         }

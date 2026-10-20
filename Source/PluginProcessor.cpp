@@ -6,7 +6,7 @@
 
 namespace
 {
-constexpr int rootNote = 60;   // every sound plays at its recorded pitch on C3 (MIDI 60)
+constexpr int defaultPreset = (bitera::numEras - 1) * bitera::soundsPerEra;   // NOW era, first one-shot
 constexpr float sustainLevel = 0.8f;
 
 const char* findResource (const char* originalName, int& size)
@@ -27,7 +27,7 @@ const char* findResource (const char* originalName, int& size)
 struct BitEraProcessor::EraSound : public juce::SamplerSound
 {
     EraSound (int idx, std::atomic<int>& active, juce::AudioFormatReader& reader)
-        : juce::SamplerSound (bitera::sound (idx).name, reader, allNotes(), rootNote, 0.002, 0.3, 30.0),
+        : juce::SamplerSound (bitera::sound (idx).name, reader, allNotes(), bitera::sound (idx).root, 0.002, 0.3, 30.0),
           index (idx), activePreset (active) {}
 
     bool appliesToNote (int) override { return activePreset.load() == index; }
@@ -64,7 +64,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout BitEraProcessor::createLayou
     auto ms = [] (float v, int) { return v < 1000.0f ? String (roundToInt (v)) + " ms" : String (v / 1000.0f, 2) + " s"; };
     auto pct = [] (float v, int) { return String (roundToInt (v * 100.0f)) + " %"; };
 
-    layout.add (std::make_unique<AudioParameterInt> (ParameterID { "preset", 1 }, "Preset", 0, bitera::numPresets - 1, bitera::numPresets - 3,
+    layout.add (std::make_unique<AudioParameterInt> (ParameterID { "preset", 1 }, "Preset", 0, bitera::numPresets - 1, defaultPreset,
         AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return String (bitera::era (bitera::eraOfPreset (v)).year) + " " + bitera::sound (v).name; })));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "volume", 1 }, "Volume", NormalisableRange<float> (-36.0f, 6.0f, 0.1f), -6.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " dB"; })));
@@ -191,8 +191,8 @@ void BitEraProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     {
         if (previewNote >= 0)
             midi.addEvent (juce::MidiMessage::noteOff (1, previewNote), 0);
-        previewNote = rootNote;
-        midi.addEvent (juce::MidiMessage::noteOn (1, rootNote, (juce::uint8) 110), 0);
+        previewNote = bitera::sound (req).root;   // the sound's own key = its recorded pitch
+        midi.addEvent (juce::MidiMessage::noteOn (1, previewNote, (juce::uint8) 110), 0);
     }
 
     synth.renderNextBlock (buffer, midi, 0, buffer.getNumSamples());

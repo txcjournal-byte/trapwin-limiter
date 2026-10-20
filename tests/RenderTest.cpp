@@ -29,8 +29,8 @@ int main()
         {
             juce::AudioBuffer<float> buf (2, block);
             juce::MidiBuffer midi;
-            if (b == 0) midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 110), 0);
-            if (b == blocks - 1) midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+            if (b == 0) midi.addEvent (juce::MidiMessage::noteOn (1, bitera::sound (preset).root, (juce::uint8) 110), 0);
+            if (b == blocks - 1) midi.addEvent (juce::MidiMessage::noteOff (1, bitera::sound (preset).root), 0);
             proc.processBlock (buf, midi);
             for (int ch = 0; ch < 2; ++ch)
                 for (int i = 0; i < block; ++i)
