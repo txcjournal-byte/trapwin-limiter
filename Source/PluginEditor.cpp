@@ -246,7 +246,307 @@ public:
 };
 
 //==============================================================================
-class Content : public Component, private Timer, private AudioProcessorValueTreeState::Listener
+// panel colours shared by the knob panel and the engine pages
+Colour panelFill (int e, const Theme& t)
+{
+    if (e == 3) return t.ink;
+    if (e == 5) return Colour (0xff3a3a3a);
+    if (e == 10 || e == 11) return Colour (0xff17171a);
+    if (e == 8) return Colours::white;
+    return t.panel;
+}
+
+bool panelIsDark (int e, const Theme& t) { return panelFill (e, t).getPerceivedBrightness() < 0.4f || e == 11 || e == 4 || e == 6; }
+
+Colour panelLabel (int e, const Theme& t) { return e == 3 ? t.accent2 : panelIsDark (e, t) ? Colours::white : t.ink; }
+
+//==============================================================================
+// LAYERS page: 4 layers (source, wave, 24 knobs) + the master voice settings
+class LayerPage : public Component, private Timer
+{
+public:
+    LayerPage (BitEraProcessor& p, const Fonts& f, KnobLookAndFeel& lnf) : proc (p), fonts (f), knobLnf (lnf)
+    {
+        static const char* ids[24] = { "level", "pan", "coarse", "fine", "char", "vel", "keylo", "keyhi",
+                                       "attack", "decay", "sustain", "release", "cutoff", "reso", "fenv", "ktrack",
+                                       "fattack", "fdecay", "fsustain", "frelease", "penv", "pdecay", "vibdepth", "vibrate" };
+        static const char* names[24] = { "LEVEL", "PAN", "COARSE", "FINE", "CHARACTER", "VELOCITY", "KEY LOW", "KEY HIGH",
+                                         "ATTACK", "DECAY", "SUSTAIN", "RELEASE", "CUTOFF", "RESONANCE", "FILTER ENV", "KEY TRACK",
+                                         "F. ATTACK", "F. DECAY", "F. SUSTAIN", "F. RELEASE", "PITCH ENV", "PITCH DECAY", "VIBRATO", "VIB RATE" };
+        for (int i = 0; i < 24; ++i)
+        {
+            cells[i].id = ids[i]; cells[i].name = names[i];
+            setupKnob (cells[i].slider);
+            addAndMakeVisible (cells[i].slider);
+        }
+        static const char* mIds[3] = { "glide", "bend", "volume" };
+        static const char* mNames[3] = { "GLIDE", "BEND", "VOLUME" };
+        for (int i = 0; i < 3; ++i)
+        {
+            master[i].id = mIds[i]; master[i].name = mNames[i];
+            setupKnob (master[i].slider);
+            addAndMakeVisible (master[i].slider);
+            master[i].attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.state, mIds[i], master[i].slider);
+        }
+        for (int s = 0; s < chips::numSources; ++s) source.addItem (chips::sourceName (s), s + 1);
+        for (int f = 0; f < numFilterTypes; ++f) filter.addItem (filterName (f), f + 1);
+        mode.addItemList ({ "POLY", "MONO", "LEGATO" }, 1);
+        for (auto* c : { &source, &filter, &mode }) { addAndMakeVisible (*c); c->setJustificationType (Justification::centredLeft); }
+        modeAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.state, "mode", mode);
+        source.onChange = [this] { clampWave(); repaint(); };
+        attachLayer (0);
+        startTimerHz (15);
+    }
+
+    ~LayerPage() override
+    {
+        for (auto& c : cells) c.slider.setLookAndFeel (nullptr);
+        for (auto& c : master) c.slider.setLookAndFeel (nullptr);
+    }
+
+    void setTheme (const Theme* th, int eraIndex)
+    {
+        theme = th; e = eraIndex;
+        const auto& t = *theme;
+        const Colour bg = panelFill (e, t), ink = panelLabel (e, t);
+        for (auto* c : { &source, &filter, &mode })
+        {
+            c->setColour (ComboBox::backgroundColourId, t.lcd);
+            c->setColour (ComboBox::textColourId, t.lcdInk);
+            c->setColour (ComboBox::outlineColourId, t.lcdInk.withAlpha (0.4f));
+            c->setColour (ComboBox::arrowColourId, t.lcdInk);
+        }
+        knobLnf.setColour (PopupMenu::backgroundColourId, t.lcd);
+        knobLnf.setColour (PopupMenu::textColourId, t.lcdInk);
+        knobLnf.setColour (PopupMenu::highlightedBackgroundColourId, t.accent);
+        knobLnf.setColour (PopupMenu::highlightedTextColourId, t.accent.getPerceivedBrightness() > 0.6f ? Colours::black : Colours::white);
+        for (auto* c : { &source, &filter, &mode }) c->setLookAndFeel (&knobLnf);
+        ignoreUnused (bg, ink);
+        repaint();
+    }
+
+    void resized() override
+    {
+        auto b = getLocalBounds().toFloat();
+        top = b.removeFromTop (44);
+        bottom = b.removeFromBottom (54);
+        grid = b.reduced (0, 4);
+        // layer tabs, then source / wave / filter
+        for (int i = 0; i < numLayers; ++i) layerBtn[i] = { top.getX() + (float) i * 47.0f, top.getY() + 4, 43, 36 };
+        source.setBounds (Rectangle<float> (layerBtn[3].getRight() + 10, top.getY() + 7, 176, 30).toNearestInt());
+        waveArea = { (float) source.getRight() + 8, top.getY() + 7, 222, 30 };
+        filter.setBounds (Rectangle<float> (waveArea.getRight() + 8, top.getY() + 7, top.getRight() - waveArea.getRight() - 8, 30).toNearestInt());
+
+        const float cw = grid.getWidth() / 8.0f, ch = grid.getHeight() / 3.0f;
+        for (int i = 0; i < 24; ++i)
+        {
+            auto cell = Rectangle<float> (grid.getX() + (float) (i % 8) * cw, grid.getY() + (float) (i / 8) * ch, cw, ch);
+            cells[i].area = cell;
+            cells[i].slider.setBounds (cell.withTrimmedTop (20).withHeight (54).withSizeKeepingCentre (52, 52).toNearestInt());
+        }
+        // master row: MASTER label, mode combo, 3 knobs with their value next to them
+        mode.setBounds (Rectangle<float> (bottom.getX() + 92, bottom.getY() + 14, 130, 30).toNearestInt());
+        for (int i = 0; i < 3; ++i)
+        {
+            auto a = Rectangle<float> (bottom.getX() + 240 + (float) i * 170, bottom.getY() + 6, 160, 46);
+            master[i].area = a;
+            master[i].slider.setBounds (a.withWidth (46).reduced (2).toNearestInt());
+        }
+    }
+
+    void paint (Graphics& g) override
+    {
+        if (theme == nullptr) return;
+        const auto& t = *theme;
+        const Colour fill = panelFill (e, t), ink = panelLabel (e, t);
+
+        // layer tabs
+        for (int i = 0; i < numLayers; ++i)
+        {
+            const bool sel = i == layer, on = isOn (i);
+            auto r = layerBtn[i];
+            g.setColour (sel ? t.accent : fill);
+            g.fillRoundedRectangle (r, jmin (t.corner, 6.0f));
+            g.setColour (sel ? t.accent : t.panelEdge);
+            g.drawRoundedRectangle (r, jmin (t.corner, 6.0f), 1.5f);
+            const Colour txt = sel ? (t.accent.getPerceivedBrightness() > 0.6f ? Colours::black : Colours::white) : ink;
+            g.setColour (txt);
+            g.setFont (fonts.body (e, 15.0f));
+            g.drawText ("L" + String (i + 1), r.withTrimmedLeft (19), Justification::centredLeft);
+            auto dot = Rectangle<float> (r.getX() + 7, r.getCentreY() - 5, 10, 10);
+            g.setColour (on ? Colour (0xff3ddc84) : txt.withAlpha (0.35f));
+            g.fillEllipse (dot);
+        }
+
+        // wave selector
+        g.setColour (t.lcd);
+        g.fillRoundedRectangle (waveArea, 4.0f);
+        g.setColour (t.lcdInk);
+        g.setFont (fonts.body (e, 15.0f));
+        g.drawText ("<", waveArea.withWidth (28), Justification::centred);
+        g.drawText (">", waveArea.withTrimmedLeft (waveArea.getWidth() - 28), Justification::centred);
+        g.drawText (chips::waveName (sourceIndex(), waveIndex()), waveArea.reduced (30, 0), Justification::centred);
+
+        // knob grid on the panel
+        auto panel = grid.expanded (0, 2);
+        g.setColour (fill);
+        if (e == 8) g.setGradientFill (ColourGradient (Colours::white, 0, panel.getY(), Colour (0xffd6e4ea), 0, panel.getBottom(), false));
+        g.fillPath (panelShape (t, panel));
+        g.setColour (e == 0 ? t.ink : t.panelEdge);
+        g.strokePath (panelShape (t, panel), PathStrokeType (e == 0 || e == 2 || e == 5 ? 2.0f : 1.0f));
+        // section dividers: osc | env | filter | mod
+        g.setColour (ink.withAlpha (0.18f));
+        g.drawVerticalLine ((int) (grid.getX() + grid.getWidth() * 0.5f), panel.getY() + 8, panel.getBottom() - 8);
+        for (int r = 1; r < 3; ++r) g.drawHorizontalLine ((int) (grid.getY() + grid.getHeight() * r / 3.0f), panel.getX() + 8, panel.getRight() - 8);
+
+        const bool layerOn = isOn (layer);
+        for (auto& c : cells)
+            paintCell (g, c, ink, layerOn ? 1.0f : 0.45f);
+
+        // master row
+        g.setColour (fill);
+        g.fillPath (panelShape (t, bottom.withTrimmedTop (4)));
+        g.setColour (t.panelEdge);
+        g.strokePath (panelShape (t, bottom.withTrimmedTop (4)), PathStrokeType (1.0f));
+        g.setColour (ink);
+        g.setFont (fonts.body (e, 14.0f));
+        g.drawText ("MASTER", bottom.withTrimmedLeft (14).withTrimmedTop (4), Justification::centredLeft);
+        for (auto& m : master)
+        {
+            g.setColour (ink);
+            g.setFont (fonts.body (e, 12.0f));
+            auto txt = m.area.withTrimmedLeft (50);
+            g.drawText (m.name, txt.withHeight (txt.getHeight() * 0.5f), Justification::bottomLeft);
+            g.setFont (fonts.body (e, 13.0f, false));
+            auto* param = proc.state.getParameter (m.id);
+            g.drawText (param != nullptr ? param->getCurrentValueAsText() : String(), txt.withTrimmedTop (txt.getHeight() * 0.5f), Justification::topLeft);
+        }
+    }
+
+    void mouseUp (const MouseEvent& ev) override
+    {
+        const auto p = ev.position;
+        for (int i = 0; i < numLayers; ++i)
+            if (layerBtn[i].contains (p))
+            {
+                if (p.x < layerBtn[i].getX() + 20 || i == layer) setOn (i, ! isOn (i));   // the dot (or a second click) switches it
+                attachLayer (i);
+                return;
+            }
+        if (waveArea.contains (p))
+        {
+            if (p.x < waveArea.getX() + 30) stepWave (-1);
+            else if (p.x > waveArea.getRight() - 30) stepWave (1);
+            else showWaveMenu();
+        }
+    }
+
+    int currentLayer() const { return layer; }
+
+private:
+    struct Cell
+    {
+        Slider slider;
+        std::unique_ptr<AudioProcessorValueTreeState::SliderAttachment> attachment;
+        const char* id = "";
+        const char* name = "";
+        Rectangle<float> area;
+    };
+
+    void setupKnob (Slider& s)
+    {
+        s.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
+        s.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+        s.setLookAndFeel (&knobLnf);
+        s.setRotaryParameters (MathConstants<float>::pi * 1.25f, MathConstants<float>::pi * 2.75f, true);
+        s.setPopupDisplayEnabled (true, true, this);
+        s.onValueChange = [this] { repaint(); };
+    }
+
+    void paintCell (Graphics& g, const Cell& c, Colour ink, float alpha)
+    {
+        const auto& t = *theme;
+        g.setColour (ink.withMultipliedAlpha (alpha));
+        g.setFont (fonts.body (e, 12.0f));
+        g.drawText (c.name, c.area.withHeight (20).translated (0, 2), Justification::centred);
+        auto vb = Rectangle<float> (c.area.getCentreX() - 40, c.area.getY() + 76, 80, 19);
+        g.setColour (t.lcd.withMultipliedAlpha (alpha));
+        g.fillRoundedRectangle (vb, 3.0f);
+        g.setColour (t.lcdInk.withMultipliedAlpha (alpha));
+        g.setFont (fonts.body (e, 12.0f));
+        auto* param = proc.state.getParameter (BitEraProcessor::layerId (layer, c.id));
+        g.drawText (param != nullptr ? param->getCurrentValueAsText() : String(), vb, Justification::centred);
+    }
+
+    void attachLayer (int l)
+    {
+        layer = jlimit (0, numLayers - 1, l);
+        for (auto& c : cells)
+        {
+            c.attachment.reset();
+            c.attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.state, BitEraProcessor::layerId (layer, c.id), c.slider);
+        }
+        sourceAttachment.reset(); filterAttachment.reset();
+        sourceAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.state, BitEraProcessor::layerId (layer, "src"), source);
+        filterAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (proc.state, BitEraProcessor::layerId (layer, "filter"), filter);
+        repaint();
+    }
+
+    RangedAudioParameter* param (const char* n) const { return proc.state.getParameter (BitEraProcessor::layerId (layer, n)); }
+    bool isOn (int l) const { auto* p = proc.state.getParameter (BitEraProcessor::layerId (l, "on")); return p != nullptr && p->getValue() > 0.5f; }
+    void setOn (int l, bool on) { if (auto* p = proc.state.getParameter (BitEraProcessor::layerId (l, "on"))) p->setValueNotifyingHost (on ? 1.0f : 0.0f); repaint(); }
+    int sourceIndex() const { auto* p = param ("src"); return p != nullptr ? roundToInt (p->convertFrom0to1 (p->getValue())) : 0; }
+    int waveIndex() const { auto* p = param ("wave"); return p != nullptr ? roundToInt (p->convertFrom0to1 (p->getValue())) : 0; }
+    void setWave (int w)
+    {
+        if (auto* p = param ("wave"))
+            p->setValueNotifyingHost (p->convertTo0to1 ((float) jlimit (0, chips::numWaves (sourceIndex()) - 1, w)));
+        repaint();
+    }
+    void stepWave (int d) { const int n = chips::numWaves (sourceIndex()); setWave ((waveIndex() + d + n) % n); }
+    void clampWave() { if (waveIndex() >= chips::numWaves (sourceIndex())) setWave (0); }
+
+    void showWaveMenu()
+    {
+        const int src = sourceIndex(), n = chips::numWaves (src);
+        PopupMenu menu;
+        menu.setLookAndFeel (&knobLnf);
+        if (chips::isSampler (src))
+        {
+            for (int ei = 0; ei < numEras; ++ei)
+            {
+                PopupMenu sub;
+                for (int k = 0; k < soundsPerEra; ++k)
+                {
+                    const int w = ei * soundsPerEra + k;
+                    if (w < n) sub.addItem (w + 1, chips::waveName (src, w), true, w == waveIndex());
+                }
+                menu.addSubMenu (String (era (ei).year) + "  " + era (ei).shortName, sub);
+            }
+        }
+        else
+            for (int w = 0; w < n; ++w) menu.addItem (w + 1, chips::waveName (src, w), true, w == waveIndex());
+        menu.showMenuAsync (PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (waveArea.toNearestInt())),
+                            [safe = SafePointer<LayerPage> (this)] (int r) { if (safe != nullptr && r > 0) safe->setWave (r - 1); });
+    }
+
+    void timerCallback() override { repaint(); }
+
+    BitEraProcessor& proc;
+    const Fonts& fonts;
+    KnobLookAndFeel& knobLnf;
+    const Theme* theme = nullptr;
+    int e = 0, layer = 0;
+    Cell cells[24], master[3];
+    ComboBox source, filter, mode;
+    std::unique_ptr<AudioProcessorValueTreeState::ComboBoxAttachment> sourceAttachment, filterAttachment, modeAttachment;
+    Rectangle<float> top, grid, bottom, waveArea, layerBtn[numLayers];
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LayerPage)
+};
+
+//==============================================================================
+class Content : public Component, private Timer
 {
 public:
     explicit Content (BitEraProcessor& p) : proc (p)
@@ -259,7 +559,7 @@ public:
         crtCover = covers[2].createCopy();
         crtCover.desaturate();
 
-        const char* ids[6] = { "volume", "attack", "decay", "release", "tone", "space" };
+        const char* ids[6] = { "volume", "l1_attack", "l1_decay", "l1_release", "tone", "space" };
         const char* names[6] = { "VOLUME", "ATTACK", "DECAY", "RELEASE", "TONE", "SPACE" };
         for (int i = 0; i < 6; ++i)
         {
@@ -276,7 +576,9 @@ public:
             k.slider.onValueChange = [this] { repaint (knobPanel.toNearestInt()); };
         }
 
-        proc.state.addParameterListener ("preset", this);
+        layerPage = std::make_unique<LayerPage> (proc, fonts, knobLnf);
+        addChildComponent (*layerPage);
+        lastPreset = proc.getPreset();
         showIntro = ! proc.introSeen();
         layout();
         updateTheme();
@@ -285,7 +587,6 @@ public:
 
     ~Content() override
     {
-        proc.state.removeParameterListener ("preset", this);
         for (auto& k : knobs)
             k.slider.setLookAndFeel (nullptr);
     }
@@ -300,13 +601,22 @@ public:
         paintBackground (g, e, t);
         paintHeader (g, e, t);
         paintCover (g, e, t);
-        paintTitle (g, e, t);
-        paintRows (g, e, t);
-        paintKnobPanel (g, e, t);
+        if (page == 0)
+        {
+            paintTitle (g, e, t);
+            paintRows (g, e, t);
+            paintKnobPanel (g, e, t);
+        }
+        else
+            paintPageTitle (g, e, t);
+        if (! showIntro)
+            paintTabs (g, e, t);
         paintStrip (g, e);
         if (showIntro)
             paintIntro (g);
     }
+
+    void setPage (int p) { page = jlimit (0, numPages - 1, p); updateTheme(); }
 
     //==========================================================================
     void mouseMove (const MouseEvent& ev) override
@@ -328,7 +638,7 @@ public:
         if (dragStarted || ev.getDistanceFromDragStart() < 6)
             return;
         if (downHit.kind == Hit::drag)
-            startWavDrag (proc.getPreset());
+            startWavDrag (proc.getPreset(), true);
         else if (downHit.kind == Hit::rowDrag || downHit.kind == Hit::row || downHit.kind == Hit::rowPlay)
             startWavDrag (currentEra() * soundsPerEra + downHit.index);
     }
@@ -373,6 +683,10 @@ public:
                 repaint();
                 break;
             }
+            case Hit::tab:
+                page = hit.index;
+                updateTheme();
+                break;
             case Hit::drag:
             case Hit::logo:
                 if (hit.kind == Hit::logo) { showIntro = true; updateTheme(); }
@@ -387,7 +701,7 @@ private:
     //==========================================================================
     struct Hit
     {
-        enum Kind { none, start, era, prev, next, row, rowPlay, rowDrag, drag, logo } kind = none;
+        enum Kind { none, start, era, prev, next, row, rowPlay, rowDrag, drag, logo, tab } kind = none;
         int index = -1;
     };
 
@@ -410,6 +724,37 @@ private:
     Rectangle<float> startBtn { 430, 446, 240, 60 };
 
     bool showIntro = false, dragStarted = false;
+    static constexpr int numPages = 2;
+    int page = 0, lastPreset = -1;
+    std::unique_ptr<LayerPage> layerPage;
+    Rectangle<float> pageArea { 332, 120, 748, 388 };
+
+    Rectangle<float> tabArea (int i) const { return { 868.0f + (float) i * 108.0f, 84.0f, 102.0f, 28.0f }; }
+
+    void paintTabs (Graphics& g, int e, const Theme& t)
+    {
+        static const char* names[numPages] = { "PLAY", "LAYERS" };
+        for (int i = 0; i < numPages; ++i)
+        {
+            auto r = tabArea (i);
+            const bool sel = i == page;
+            g.setColour (sel ? t.accent : t.lcd);
+            if (t.frame == FrameStyle::pixel || t.frame == FrameStyle::flat) g.fillRect (r); else g.fillRoundedRectangle (r, jmin (t.corner, 6.0f));
+            g.setColour (sel ? (t.accent.getPerceivedBrightness() > 0.6f ? Colours::black : Colours::white) : t.lcdInk);
+            g.setFont (fonts.body (e, 14.0f));
+            g.drawText (names[i], r, Justification::centred);
+        }
+    }
+
+    void paintPageTitle (Graphics& g, int e, const Theme& t)
+    {
+        const auto& E = era (e);
+        g.setColour (e == 6 || e == 4 || e == 11 ? Colours::white : t.ink);
+        g.setFont (fonts.display (e, 26.0f));
+        const String a = String (E.title).upToFirstOccurrenceOf ("\n", false, false), b = String (E.title).fromFirstOccurrenceOf ("\n", false, false);
+        const String title = b.isEmpty() ? a : a + (CharacterFunctions::isLowerCase (b[0]) ? "" : " ") + b;
+        g.drawText (title, Rectangle<float> (332, 82, 520, 32), Justification::centredLeft);
+    }
     Hit downHit;
     int playing = -1;
     double playEndMs = 0;
@@ -418,6 +763,7 @@ private:
 
     void layout()
     {
+        layerPage->setBounds (pageArea.toNearestInt());
         for (int i = 0; i < soundsPerEra; ++i)
             rows[i] = { 332.0f + (float) (i / 3) * 326.0f, 232.0f + (float) (i % 3) * 52.0f, 314.0f, 46.0f };   // left: one-shots, right: phrases / loops / FX
         const float kw = (knobPanel.getWidth() - 28.0f) / 6.0f;
@@ -430,20 +776,23 @@ private:
     {
         knobLnf.theme = &era (currentEra()).theme;
         for (auto& k : knobs)
-            k.slider.setVisible (! showIntro);
+            k.slider.setVisible (! showIntro && page == 0);
+        layerPage->setTheme (&era (currentEra()).theme, currentEra());
+        layerPage->setVisible (! showIntro && page == 1);
         repaint();
     }
 
-    void parameterChanged (const String&, float) override
-    {
-        MessageManager::callAsync ([safe = SafePointer<Content> (this)] { if (safe != nullptr) safe->updateTheme(); });
-    }
 
     void timerCallback() override
     {
+        if (proc.getPreset() != lastPreset)
+        {
+            lastPreset = proc.getPreset();
+            updateTheme();
+        }
         for (auto& k : knobs)
-            if (k.slider.isVisible() == showIntro)
-                k.slider.setVisible (! showIntro);
+            if (k.slider.isVisible() != (! showIntro && page == 0))
+                k.slider.setVisible (! showIntro && page == 0);
         if (playing >= 0 && Time::getMillisecondCounterHiRes() > playEndMs)
         {
             playing = -1;
@@ -465,6 +814,9 @@ private:
         if (logoArea.contains (p)) return { Hit::logo, 0 };
         if (display.contains (p)) return { p.x < display.getCentreX() ? Hit::prev : Hit::next, 0 };
         if (dragBtn.contains (p)) return { Hit::drag, 0 };
+        for (int i = 0; i < numPages; ++i)
+            if (tabArea (i).contains (p)) return { Hit::tab, i };
+        if (page != 0 && ! strip.contains (p)) return {};
         for (int i = 0; i < soundsPerEra; ++i)
             if (rows[i].contains (p))
             {
@@ -481,10 +833,11 @@ private:
         return {};
     }
 
-    void startWavDrag (int preset)
+    // DRAG WAV renders what the instrument plays now (layers + master); a row drags that era sound as it is
+    void startWavDrag (int preset, bool renderCurrent = false)
     {
         MemoryBlock mb;
-        if (! proc.getSoundWav (preset, mb))
+        if (! (renderCurrent ? proc.renderCurrentWav (mb) : proc.getSoundWav (preset, mb)))
             return;
         auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("Bit Era");
         dir.createDirectory();
@@ -996,6 +1349,8 @@ BitEraEditor::BitEraEditor (BitEraProcessor& p)
 }
 
 BitEraEditor::~BitEraEditor() = default;
+
+void BitEraEditor::showPage (int page) { content->setPage (page); }
 
 void BitEraEditor::paint (juce::Graphics& g) { g.fillAll (juce::Colours::black); }
 

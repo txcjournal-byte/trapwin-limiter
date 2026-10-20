@@ -3,9 +3,11 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_dsp/juce_dsp.h>
 #include "Eras.h"
+#include "Engine.h"
 
-// BIT ERA engine: 36 embedded sounds (3 per era), one active preset at a time, played from MIDI on a pitched
-// sampler (root C3 = MIDI 60). Volume / ADSR / Tone (low-pass) / Space (reverb) on the output.
+// BIT ERA: 4-layer chip / sampler engine (see Engine.h), the era sample bank and the era presets.
+// Parameters: l1_..l4_ per layer, m_ for the master. The preset index lives in the state (not a parameter):
+// loading a preset writes the layer parameters, so every preset stays fully editable and automatable.
 class BitEraProcessor : public juce::AudioProcessor
 {
 public:
@@ -25,7 +27,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 2.0; }
+    double getTailLengthSeconds() const override { return 3.0; }
 
     int getNumPrograms() override { return bitera::numPresets; }
     int getCurrentProgram() override { return getPreset(); }
@@ -38,43 +40,43 @@ public:
 
     // presets
     int getPreset() const;
-    void setPreset (int preset);
-    // plays the active preset at its root note (the play buttons); length in seconds
-    void previewPreset (int preset);
+    void setPreset (int preset);          // loads the preset into the layer parameters
+    void previewPreset (int preset);      // loads + plays it at its root key (the play buttons)
     void stopPreview();
     double getSoundLengthSeconds (int preset) const;
-    // the raw WAV of a preset (for Drag WAV)
-    bool getSoundWav (int preset, juce::MemoryBlock& out) const;
+    int previewNote (int preset) const;
+    bool getSoundWav (int preset, juce::MemoryBlock& out) const;   // the era sound as it is
+    // renders what the instrument plays right now (current layers + master) at the preset's root key to a WAV
+    bool renderCurrentWav (juce::MemoryBlock& out);
 
     bool introSeen() const { return state.state.getProperty ("introSeen", false); }
     void setIntroSeen() { state.state.setProperty ("introSeen", true, nullptr); }
 
+    const bitera::chips::Bank& getBank() const { return bank; }
     juce::AudioProcessorValueTreeState state;
+
+    static juce::String layerId (int layer, const char* name) { return "l" + juce::String (layer + 1) + "_" + name; }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-    void loadSounds();
-    void updateEnvelopes();
+    void loadBank();
+    void readParams (bitera::EngineParams& p) const;
+    void setParam (const juce::String& id, float value);
 
-    struct EraSound;
-    juce::Synthesiser synth;
-    std::atomic<int> activePreset { (bitera::numEras - 1) * bitera::soundsPerEra };
+    bitera::chips::Bank bank;
+    bitera::Engine engine;
+    bitera::EngineParams params;
+
     std::atomic<int> previewRequest { -1 }, previewStop { 0 };
-    int previewNote = -1;
-    double soundLength[bitera::numPresets] {};
+    int previewPlaying = -1;
 
-    juce::dsp::StateVariableTPTFilter<float> tone;
-    juce::dsp::Reverb reverb;
-    juce::SmoothedValue<float> gain;
-    float lastA = -1, lastD = -1, lastR = -1;
-
-    std::atomic<float>* pVolume = nullptr;
-    std::atomic<float>* pAttack = nullptr;
-    std::atomic<float>* pDecay = nullptr;
-    std::atomic<float>* pRelease = nullptr;
-    std::atomic<float>* pTone = nullptr;
-    std::atomic<float>* pSpace = nullptr;
-    std::atomic<float>* pPreset = nullptr;
+    struct LayerPtrs
+    {
+        std::atomic<float> *on, *source, *wave, *level, *pan, *coarse, *fine, *character, *velSens, *keyLo, *keyHi,
+                           *a, *d, *s, *r, *filter, *cutoff, *reso, *fltEnv, *keyTrack, *fa, *fd, *fs, *fr,
+                           *pitchEnv, *pitchDecay, *vibDepth, *vibRate;
+    } lp[bitera::numLayers] {};
+    std::atomic<float> *pMode = nullptr, *pGlide = nullptr, *pBend = nullptr, *pVolume = nullptr, *pTone = nullptr, *pSpace = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BitEraProcessor)
 };

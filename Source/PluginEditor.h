@@ -14,6 +14,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void showPage (int page);   // 0 PLAY, 1 LAYERS
 
     static constexpr int designWidth = 1100, designHeight = 700;
 
